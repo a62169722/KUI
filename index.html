@@ -322,7 +322,7 @@
                 const toggleNode = async (id, status) => { await fetchApi('/api/nodes', { method: 'PUT', body: JSON.stringify({ id: id, enable: status }) }); refreshData(); };
                 const resetTraffic = async (id) => { if(confirm('确定清空该节点的已用流量？')) { await fetchApi('/api/nodes', { method: 'PUT', body: JSON.stringify({ id: id, reset_traffic: true }) }); refreshData(); } };
 
-                const generateCmd = (ip) => `bash <(curl -sL https://raw.githubusercontent.com/a62169722/KUI/main/vps/kui.sh) --api "${currentDomain}" --ip "${ip}" --token "${token.value}"`;
+                const generateCmd = (ip) => `apt-get update -y && apt-get install -y curl && bash <(curl -sL https://raw.githubusercontent.com/a62169722/KUI/main/vps/kui.sh) --api "${currentDomain}" --ip "${ip}" --token "${token.value}"`;
                 const generateSubLink = (ip) => `${currentDomain}/api/sub?ip=${ip}&token=${token.value}`;
                 const copyCommand = (text, msg = '部署指令已复制！') => navigator.clipboard.writeText(text).then(() => alert(msg));
 
