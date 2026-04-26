@@ -7,13 +7,11 @@ export async function onRequest(context) {
     const ADMIN_PASS = env.ADMIN_PASSWORD || "admin"; 
     const db = env.DB; 
 
-    // Agent 上报接口：同时接收系统状态与节点流量增量 (Delta)
     if (action === "report" && method === "POST") {
         const data = await request.json(); 
         await db.prepare("UPDATE servers SET cpu = ?, mem = ?, last_report = ? WHERE ip = ?")
                 .bind(data.cpu, data.mem, Date.now(), data.ip).run();
                 
-        // 处理节点流量增量累加
         if (data.node_traffic && data.node_traffic.length > 0) {
             const stmts = data.node_traffic.map(nt => 
                 db.prepare("UPDATE nodes SET traffic_used = traffic_used + ? WHERE id = ?").bind(nt.delta_bytes, nt.id)
@@ -23,17 +21,17 @@ export async function onRequest(context) {
         return Response.json({ success: true });
     }
 
-    // Agent 拉取配置接口：核心风控拦截引擎
     if (action === "config" && method === "GET") {
         if (request.headers.get("Authorization") !== ADMIN_PASS) return Response.json({ error: "Unauthorized" }, { status: 401 });
         const ip = url.searchParams.get("ip");
         const now = Date.now();
         
-        // 核心风控：仅下发启用、未超流量且未过期的节点
+        // 提取该机器的流媒体解锁配置
+        const serverInfo = await db.prepare("SELECT unlock_proxy FROM servers WHERE ip = ?").bind(ip).first();
+
         const query = `
             SELECT * FROM nodes 
-            WHERE vps_ip = ? 
-            AND enable = 1 
+            WHERE vps_ip = ? AND enable = 1 
             AND (traffic_limit = 0 OR traffic_used < traffic_limit)
             AND (expire_time = 0 OR expire_time > ?)
         `;
@@ -50,7 +48,8 @@ export async function onRequest(context) {
                 }
             }
         }
-        return Response.json({ success: true, configs: machineNodes });
+        // 将解锁规则一并下发给 Agent
+        return Response.json({ success: true, server: serverInfo, configs: machineNodes });
     }
 
     if (action === "sub" && method === "GET") {
@@ -59,7 +58,6 @@ export async function onRequest(context) {
         if (token !== ADMIN_PASS) return new Response("Invalid Sub Token", { status: 403 });
 
         const now = Date.now();
-        // 订阅也走风控：超量或过期节点不在订阅中显示
         let query = `SELECT * FROM nodes WHERE enable = 1 AND (traffic_limit = 0 OR traffic_used < traffic_limit) AND (expire_time = 0 OR expire_time > ?)`;
         let sqlParams = [now];
         
@@ -106,6 +104,12 @@ export async function onRequest(context) {
             if (method === "POST") {
                 const { ip, name } = await request.json();
                 await db.prepare("INSERT OR IGNORE INTO servers (ip, name) VALUES (?, ?)").bind(ip, name).run();
+                return Response.json({ success: true });
+            }
+            if (method === "PUT") {
+                // 保存机器的流媒体解锁配置
+                const { ip, unlock_proxy } = await request.json();
+                await db.prepare("UPDATE servers SET unlock_proxy = ? WHERE ip = ?").bind(unlock_proxy, ip).run();
                 return Response.json({ success: true });
             }
             if (method === "DELETE") {
