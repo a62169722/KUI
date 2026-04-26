@@ -55,16 +55,26 @@
                             </div>
                             <button @click="deleteVps(vps.ip)" class="text-gray-400 hover:text-red-500 text-sm transition">移除</button>
                         </div>
-                        <div class="flex gap-4">
-                            <div class="flex-1 bg-gray-50 p-2 rounded border">
-                                <div class="text-xs text-gray-500 mb-1">CPU</div>
-                                <div class="font-bold">{{ vps.cpu || 0 }}%</div>
-                                <div class="w-full bg-gray-200 rounded-full h-1 mt-1"><div class="bg-black h-1 rounded-full" :style="{ width: (vps.cpu || 0) + '%' }"></div></div>
+                        
+                        <div class="flex flex-col gap-2">
+                            <div class="flex gap-4">
+                                <div class="flex-1 bg-gray-50 p-2 rounded border">
+                                    <div class="text-xs text-gray-500 mb-1">CPU</div>
+                                    <div class="font-bold">{{ vps.cpu || 0 }}%</div>
+                                    <div class="w-full bg-gray-200 rounded-full h-1 mt-1"><div class="bg-black h-1 rounded-full" :style="{ width: (vps.cpu || 0) + '%' }"></div></div>
+                                </div>
+                                <div class="flex-1 bg-gray-50 p-2 rounded border">
+                                    <div class="text-xs text-gray-500 mb-1">RAM</div>
+                                    <div class="font-bold">{{ vps.mem || 0 }}%</div>
+                                    <div class="w-full bg-gray-200 rounded-full h-1 mt-1"><div class="bg-black h-1 rounded-full" :style="{ width: (vps.mem || 0) + '%' }"></div></div>
+                                </div>
                             </div>
-                            <div class="flex-1 bg-gray-50 p-2 rounded border">
-                                <div class="text-xs text-gray-500 mb-1">RAM</div>
-                                <div class="font-bold">{{ vps.mem || 0 }}%</div>
-                                <div class="w-full bg-gray-200 rounded-full h-1 mt-1"><div class="bg-black h-1 rounded-full" :style="{ width: (vps.mem || 0) + '%' }"></div></div>
+                            <div class="bg-indigo-50 border border-indigo-100 p-2 rounded flex items-center gap-2">
+                                <div class="text-indigo-600">📺</div>
+                                <div class="flex-1">
+                                    <input v-model="vps.unlock_proxy" placeholder="流媒体解锁代理 (填Socks5地址, 例如 127.0.0.1:40000)" class="w-full bg-transparent border-b border-indigo-200 outline-none text-xs text-indigo-900 placeholder-indigo-300 pb-1">
+                                </div>
+                                <button @click="saveUnlock(vps)" class="text-[10px] bg-indigo-600 text-white px-2 py-1 rounded hover:bg-indigo-700">保存路由</button>
                             </div>
                         </div>
                     </div>
@@ -193,7 +203,6 @@
 
                 const isOnline = (lastReport) => lastReport && (Date.now() - lastReport) < 10 * 60 * 1000;
                 
-                // 工具函数
                 const formatBytes = (bytes) => {
                     if (bytes === 0) return '0 B';
                     const k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB'], i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -245,6 +254,12 @@
                 const deleteVps = async (ip) => {
                     if(confirm('删除机器将清理其下所有节点配置！')) { await fetchApi('/api/vps?ip=' + ip, { method: 'DELETE' }); refreshData(); }
                 };
+                
+                // 保存解锁路由配置
+                const saveUnlock = async (vps) => {
+                    await fetchApi('/api/vps', { method: 'PUT', body: JSON.stringify({ ip: vps.ip, unlock_proxy: vps.unlock_proxy }) });
+                    alert('路由配置已保存，Agent 将在一分钟内应用分流！');
+                };
 
                 const getNodesByIp = (ip) => nodes.value.filter(n => n.vps_ip === ip);
                 const getVpsName = (ip) => servers.value.find(s => s.ip === ip)?.name || ip;
@@ -279,8 +294,6 @@
                 };
 
                 const deleteNode = async (id) => { await fetchApi('/api/nodes?id=' + id, { method: 'DELETE' }); refreshData(); };
-                
-                // 3X-UI 操作功能
                 const toggleNode = async (id, status) => { await fetchApi('/api/nodes', { method: 'PUT', body: JSON.stringify({ id: id, enable: status }) }); refreshData(); };
                 const resetTraffic = async (id) => { if(confirm('确定清空该节点的已用流量？')) { await fetchApi('/api/nodes', { method: 'PUT', body: JSON.stringify({ id: id, reset_traffic: true }) }); refreshData(); } };
 
@@ -290,7 +303,7 @@
 
                 onMounted(() => { if (token.value) { isLoggedIn.value = true; refreshData(); } });
 
-                return { isLoggedIn, password, login, logout, servers, nodes, newVps, newNodeParams, isOnline, formatBytes, formatDate, getTrafficPercent, refreshData, addVps, deleteVps, getNodesByIp, getAllOtherNodes, getVpsName, addNode, deleteNode, toggleNode, resetTraffic, generateCmd, generateSubLink, copyCommand };
+                return { isLoggedIn, password, login, logout, servers, nodes, newVps, newNodeParams, isOnline, formatBytes, formatDate, getTrafficPercent, refreshData, addVps, deleteVps, saveUnlock, getNodesByIp, getAllOtherNodes, getVpsName, addNode, deleteNode, toggleNode, resetTraffic, generateCmd, generateSubLink, copyCommand };
             }
         }).mount('#app');
     </script>
