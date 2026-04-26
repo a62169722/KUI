@@ -1,5 +1,6 @@
 #!/bin/bash
-# 解析参数
+
+# 解析传入的安装参数
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --api) API_DOMAIN="$2"; shift ;;
@@ -10,23 +11,23 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 if [ -z "$API_DOMAIN" ] || [ -z "$VPS_IP" ] || [ -z "$ADMIN_TOKEN" ]; then
-    echo "缺少必要参数！请从 KUI 面板复制完整命令。"
+    echo "缺少参数！请直接在 Web 控制台复制完整的部署命令。"
     exit 1
 fi
 
-echo ">> 正在初始化 KUI Agent 环境..."
-apt-get update -y
-apt-get install -y curl wget python3
+echo ">> [1/4] 安装必要依赖..."
+apt-get update -y >/dev/null 2>&1
+apt-get install -y curl wget python3 >/dev/null 2>&1
 
-echo ">> 安装 Sing-box 核心..."
-bash <(curl -fsSL https://sing-box.app/deb-install.sh)
+echo ">> [2/4] 部署 Sing-box 底层核心..."
+bash <(curl -fsSL https://sing-box.app/deb-install.sh) >/dev/null 2>&1
 
-echo ">> 下载 Python Agent..."
+echo ">> [3/4] 下载配置 Agent..."
 mkdir -p /opt/kui
-# 请替换为你的真实 GitHub Raw 地址
-wget -O /opt/kui/agent.py "https://raw.githubusercontent.com/your-username/KUI/main/vps/agent.py"
+# 注意：在此处替换你真实的 GitHub RAW 链接
+wget -qO /opt/kui/agent.py "https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/YOUR_REPO/main/vps/agent.py"
 
-# 将参数写入 agent 的配置文件
+# 生成 Agent 所需的本地配置
 cat <<EOF > /opt/kui/config.json
 {
   "api_url": "$API_DOMAIN/api/config",
@@ -36,10 +37,10 @@ cat <<EOF > /opt/kui/config.json
 }
 EOF
 
-echo ">> 注册 Systemd 守护进程..."
+echo ">> [4/4] 注册并启动系统服务..."
 cat <<EOF > /etc/systemd/system/kui-agent.service
 [Unit]
-Description=KUI Python Agent
+Description=Serverless Gateway Python Agent
 After=network.target
 
 [Service]
@@ -53,9 +54,12 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable kui-agent
-systemctl start kui-agent
-systemctl enable sing-box
-systemctl start sing-box
+systemctl enable kui-agent >/dev/null 2>&1
+systemctl restart kui-agent
+systemctl enable sing-box >/dev/null 2>&1
+systemctl restart sing-box
 
-echo ">> 安装完成！KUI Agent 已在后台运行，请前往面板查看探针状态。"
+echo "======================================"
+echo " 部署完成！"
+echo " 守护进程已常驻后台，请返回网页控制台查看探针心跳。"
+echo "======================================"
