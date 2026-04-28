@@ -45,7 +45,6 @@
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div v-for="vps in servers" :key="vps.ip" class="bg-white rounded-lg shadow-sm border overflow-hidden flex flex-col">
-                    
                     <div class="p-5 border-b relative">
                         <div class="flex justify-between items-start mb-4">
                             <div>
@@ -57,7 +56,6 @@
                             </div>
                             <button @click="deleteVps(vps.ip)" class="text-gray-400 hover:text-red-500 text-sm transition">移除</button>
                         </div>
-                        
                         <div class="flex flex-col gap-2">
                             <div class="flex gap-4">
                                 <div class="flex-1 bg-gray-50 p-2 rounded border">
@@ -72,7 +70,6 @@
                                 </div>
                             </div>
                         </div>
-
                         <div class="mt-4 pt-4 border-t border-dashed">
                             <div class="text-[10px] text-gray-400 mb-2 font-bold tracking-wider">7 DAY TRAFFIC TREND</div>
                             <div :id="'chart-' + vps.ip" class="w-full h-32"></div>
@@ -91,26 +88,18 @@
                                             <span v-else-if="node.expire_time > 0 && node.expire_time < Date.now()" class="text-[10px] bg-red-100 text-red-600 px-1.5 rounded">已过期</span>
                                             <span v-else class="text-[10px] bg-green-100 text-green-600 px-1.5 rounded">运行中</span>
                                         </div>
-                                        <div v-if="node.expire_time > 0" class="text-[10px] text-gray-400 mt-1">到期: {{ formatDate(node.expire_time) }}</div>
                                     </div>
-                                    
                                     <div class="flex gap-2">
-                                        <button @click="toggleNode(node.id, node.enable === 1 ? 0 : 1)" class="text-xs px-2 py-1 rounded" :class="node.enable === 1 ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-blue-100 text-blue-600 hover:bg-blue-200'">
-                                            {{ node.enable === 1 ? '停用' : '启用' }}
-                                        </button>
+                                        <button @click="toggleNode(node.id, node.enable === 1 ? 0 : 1)" class="text-xs px-2 py-1 rounded" :class="node.enable === 1 ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-blue-100 text-blue-600 hover:bg-blue-200'">{{ node.enable === 1 ? '停用' : '启用' }}</button>
                                         <button @click="deleteNode(node.id)" class="text-red-500 text-xs px-2 py-1 bg-red-50 rounded hover:bg-red-100">删除</button>
                                     </div>
                                 </div>
-                                
                                 <div class="w-full bg-gray-100 rounded-full h-1.5 mt-2">
                                     <div :class="(node.traffic_limit > 0 && node.traffic_used >= node.traffic_limit) ? 'bg-red-500' : 'bg-black'" class="h-1.5 rounded-full" :style="{ width: getTrafficPercent(node.traffic_used, node.traffic_limit) + '%' }"></div>
                                 </div>
                                 <div class="flex justify-between text-[10px] text-gray-500 mt-1">
                                     <span>已用: {{ formatBytes(node.traffic_used) }}</span>
-                                    <div class="flex items-center gap-2">
-                                        <span>{{ node.traffic_limit > 0 ? '上限: ' + formatBytes(node.traffic_limit) : '无上限' }}</span>
-                                        <button v-if="node.traffic_used > 0" @click="resetTraffic(node.id)" class="text-blue-500 hover:underline">清零</button>
-                                    </div>
+                                    <button v-if="node.traffic_used > 0" @click="resetTraffic(node.id)" class="text-blue-500 hover:underline">清零</button>
                                 </div>
                             </li>
                             <li v-if="getNodesByIp(vps.ip).length === 0" class="text-center text-gray-400 text-sm py-2">暂无挂载规则</li>
@@ -122,57 +111,20 @@
                                     <option value="VLESS">VLESS</option>
                                     <option value="Reality">Reality</option>
                                     <option value="Hysteria2">Hysteria 2</option>
-                                    <option value="dokodemo-door">转发(任意门)</option>
+                                    <option value="dokodemo-door">转发</option>
                                 </select>
                                 <input v-model="newNodeParams[vps.ip].port" type="number" placeholder="端口" class="border text-sm p-2 rounded w-20 bg-gray-50 outline-none">
                             </div>
-                            
-                            <div class="grid grid-cols-2 gap-2 mb-2">
-                                <div class="bg-gray-50 p-2 rounded border">
-                                    <label class="block text-[10px] text-gray-500 font-bold mb-1">配额 (GB, 0无限)</label>
-                                    <input v-model="newNodeParams[vps.ip].traffic_limit_gb" type="number" min="0" class="w-full text-sm p-1 border rounded outline-none" placeholder="0">
-                                </div>
-                                <div class="bg-gray-50 p-2 rounded border">
-                                    <label class="block text-[10px] text-gray-500 font-bold mb-1">到期时间 (留空永久)</label>
-                                    <input v-model="newNodeParams[vps.ip].expire_date" type="date" class="w-full text-sm p-1 border rounded outline-none text-gray-600">
-                                </div>
+                            <div v-if="newNodeParams[vps.ip].protocol === 'Reality'" class="mb-2">
+                                <input v-model="newNodeParams[vps.ip].sni" placeholder="伪装域名: www.apple.com" class="w-full border p-1.5 rounded outline-none text-xs">
                             </div>
-
-                            <div v-if="newNodeParams[vps.ip].protocol === 'Reality'" class="bg-gray-50 p-2 rounded mb-2 text-sm border">
-                                <input v-model="newNodeParams[vps.ip].sni" list="sni-recommend" placeholder="伪装域名: 支持手填或下拉选择" class="w-full border p-1.5 rounded outline-none text-xs">
-                                <datalist id="sni-recommend">
-                                    <option value="www.apple.com"></option>
-                                    <option value="gateway.icloud.com"></option>
-                                    <option value="itunes.apple.com"></option>
-                                    <option value="swdist.apple.com"></option>
-                                    <option value="www.microsoft.com"></option>
-                                    <option value="update.microsoft.com"></option>
-                                    <option value="dl.google.com"></option>
-                                </datalist>
-                            </div>
-
-                            <div v-if="newNodeParams[vps.ip].protocol === 'dokodemo-door'" class="bg-blue-50 p-2 rounded mb-2 text-sm border border-blue-100">
-                                <div class="flex gap-4 text-blue-800 font-bold text-[10px] mb-2">
-                                    <label><input type="radio" v-model="newNodeParams[vps.ip].relay_type" value="external"> 公网转发</label>
-                                    <label><input type="radio" v-model="newNodeParams[vps.ip].relay_type" value="internal"> 内部链式</label>
-                                </div>
-                                <div v-if="newNodeParams[vps.ip].relay_type === 'external'" class="flex gap-2">
-                                    <input v-model="newNodeParams[vps.ip].target_ip" placeholder="目标 IP" class="border p-1.5 rounded flex-1 outline-none text-xs">
-                                    <input v-model="newNodeParams[vps.ip].target_port" placeholder="端口" class="border p-1.5 rounded w-16 outline-none text-xs">
-                                </div>
-                                <select v-if="newNodeParams[vps.ip].relay_type === 'internal'" v-model="newNodeParams[vps.ip].target_id" class="border p-1.5 rounded w-full outline-none text-xs">
-                                    <option value="">-- 选择目标节点 --</option>
-                                    <option v-for="n in getAllOtherNodes(vps.ip)" :value="n.id">{{ getVpsName(n.vps_ip) }} - {{ n.protocol }}:{{ n.port }}</option>
-                                </select>
-                            </div>
-
                             <button @click="addNode(vps.ip)" class="w-full bg-gray-800 text-white text-sm py-2 rounded font-bold hover:bg-black transition">配置下发</button>
                         </div>
                     </div>
 
                     <div class="grid grid-cols-2 gap-2 mt-auto p-4 bg-gray-50 border-t">
                         <div class="bg-black p-3 rounded cursor-pointer group col-span-2 md:col-span-1" @click="copyCommand(generateCmd(vps.ip))">
-                            <div class="text-[10px] text-gray-400 mb-1 uppercase tracking-wider">终端部署指令 (加固版)</div>
+                            <div class="text-[10px] text-gray-400 mb-1 uppercase tracking-wider">终端部署指令</div>
                             <div class="text-green-400 font-mono text-xs truncate">bash <(curl -sL ...</div>
                         </div>
                         <div class="bg-blue-600 p-3 rounded cursor-pointer hover:bg-blue-700 transition flex items-center justify-center text-white font-bold shadow-sm col-span-2 md:col-span-1" @click="copyCommand(generateSubLink(vps.ip), '订阅链接已复制！')">
@@ -191,7 +143,6 @@
     <script>
         const { createApp, ref, reactive, onMounted, onUnmounted, nextTick } = Vue;
         
-        // --- 密码学工具函数 (Web Crypto API) ---
         const toBase64Url = (uint8Array) => {
             let str = ''; for (let i = 0; i < uint8Array.length; i++) str += String.fromCharCode(uint8Array[i]);
             return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
@@ -200,12 +151,10 @@
             const keypair = nacl.box.keyPair();
             return { privateKey: toBase64Url(keypair.secretKey), publicKey: toBase64Url(keypair.publicKey), shortId: crypto.randomUUID().replace(/-/g, '').substring(0, 16) };
         };
-        
         const sha256 = async (text) => {
             const buffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
             return Array.from(new Uint8Array(buffer)).map(b => b.toString(16).padStart(2, '0')).join('');
         };
-        
         const generateHMAC = async (keyHex, message) => {
             const keyBytes = new Uint8Array(keyHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
             const key = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -217,7 +166,6 @@
             setup() {
                 const isLoggedIn = ref(false);
                 const password = ref('');
-                // 保存的不再是明文密码，而是密码的 Hash 值
                 const authKey = ref(localStorage.getItem('kui_auth_key') || '');
                 const servers = ref([]);
                 const nodes = ref([]);
@@ -225,115 +173,74 @@
                 const newNodeParams = reactive({}); 
                 const currentDomain = window.location.origin;
 
-                // --- 页面可见性与轮询控制 ---
                 let pollTimer = null;
+                const startPolling = () => { if (!pollTimer) pollTimer = setInterval(() => { if (isLoggedIn.value) refreshData(); }, 30000); };
+                const stopPolling = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
+                const handleVisibilityChange = () => { if (document.hidden) stopPolling(); else if (isLoggedIn.value) { refreshData(); startPolling(); } };
 
-                const startPolling = () => {
-                    if (!pollTimer) pollTimer = setInterval(() => { if (isLoggedIn.value) refreshData(); }, 30000);
-                };
-                const stopPolling = () => {
-                    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-                };
-                const handleVisibilityChange = () => {
-                    if (document.hidden) stopPolling();
-                    else if (isLoggedIn.value) { refreshData(); startPolling(); }
-                };
-
-                // 在线状态判断 (10分钟超时)
                 const isOnline = (lastReport) => lastReport && (Date.now() - lastReport) < 10 * 60 * 1000;
-                
-                // 格式化工具
-                const formatBytes = (bytes) => {
-                    if (bytes === 0) return '0 B';
-                    const k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB'], i = Math.floor(Math.log(bytes) / Math.log(k));
-                    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-                };
-                const formatDate = (ts) => {
-                    if (!ts) return '永久';
-                    const d = new Date(ts);
-                    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-                };
-                const getTrafficPercent = (used, limit) => {
-                    if (limit === 0) return 0;
-                    return Math.min((used / limit) * 100, 100);
-                };
+                const formatBytes = (bytes) => { if (bytes === 0) return '0 B'; const k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB'], i = Math.floor(Math.log(bytes) / Math.log(k)); return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]; };
+                const formatDate = (ts) => { if (!ts) return '永久'; const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+                const getTrafficPercent = (used, limit) => { if (limit === 0) return 0; return Math.min((used / limit) * 100, 100); };
 
-                // 核心：每次请求附带 HMAC 动态签名
+                // 🌟 核心修复：加入强大的弹窗报警器
                 const fetchApi = async (url, options = {}) => {
                     const timestamp = Date.now().toString();
                     const signature = await generateHMAC(authKey.value, timestamp);
-                    const dynamicToken = `${timestamp}.${signature}`; 
+                    options.headers = { ...options.headers, 'Authorization': `${timestamp}.${signature}` };
                     
-                    options.headers = { ...options.headers, 'Authorization': dynamicToken };
                     const res = await fetch(url, options);
+                    
                     if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
+                    
+                    if (!res.ok) {
+                        try {
+                            const errData = await res.json();
+                            alert(`❌ 后端报错 (${res.status}): ${errData.error}\n\n👉 提示：请检查 Cloudflare Pages 设置中是否绑定了 DB 变量，或是否在数据库中创建了对应的表！`);
+                        } catch (e) {
+                            alert(`❌ 致命错误 (${res.status}): 后端无法连接数据库，请检查 Cloudflare 上的 D1 设置！`);
+                        }
+                        throw new Error('API Failed');
+                    }
                     return res;
                 };
 
-                // 登录流程
                 const login = async () => {
                     try {
                         const hashedPass = await sha256(password.value);
                         const timestamp = Date.now().toString();
                         const signature = await generateHMAC(hashedPass, timestamp);
-                        
-                        const res = await fetch('/api/login', {
-                            method: 'POST',
-                            headers: { 'Authorization': `${timestamp}.${signature}` }
-                        });
-
+                        const res = await fetch('/api/login', { method: 'POST', headers: { 'Authorization': `${timestamp}.${signature}` } });
                         if (res.ok) { 
-                            authKey.value = hashedPass; 
-                            localStorage.setItem('kui_auth_key', authKey.value); 
-                            isLoggedIn.value = true; 
-                            password.value = ''; // 内存清理
-                            refreshData(); 
-                            startPolling(); 
-                        } else {
-                            alert('密码错误或请求已过期');
-                        }
-                    } catch (e) {
-                        alert('登录验证异常');
-                    }
+                            authKey.value = hashedPass; localStorage.setItem('kui_auth_key', authKey.value); 
+                            isLoggedIn.value = true; password.value = ''; refreshData(); startPolling(); 
+                        } else alert('密码错误');
+                    } catch (e) { alert('登录异常'); }
                 };
 
-                const logout = () => { 
-                    localStorage.removeItem('kui_auth_key'); 
-                    isLoggedIn.value = false; 
-                    authKey.value = password.value = ''; 
-                    stopPolling(); 
-                };
+                const logout = () => { localStorage.removeItem('kui_auth_key'); isLoggedIn.value = false; authKey.value = password.value = ''; stopPolling(); };
 
-                // 渲染图表核心函数 (静默更新防闪烁)
                 const renderCharts = async () => {
                     await nextTick();
                     for (let vps of servers.value) {
                         try {
                             const res = await fetchApi(`/api/stats?ip=${vps.ip}`);
                             const stats = await res.json();
-                            
                             const chartDom = document.getElementById('chart-' + vps.ip);
                             if (chartDom) {
                                 let myChart = echarts.getInstanceByDom(chartDom);
-                                if (!myChart) {
-                                    myChart = echarts.init(chartDom);
-                                    window.addEventListener('resize', () => myChart.resize());
-                                }
+                                if (!myChart) { myChart = echarts.init(chartDom); window.addEventListener('resize', () => myChart.resize()); }
                                 const days = stats.map(s => s.day);
                                 const bytes = stats.map(s => (s.total_bytes / 1024 / 1024).toFixed(2));
-                                
                                 myChart.setOption({
                                     tooltip: { trigger: 'axis', formatter: '{b}<br/>{c} MB' },
                                     grid: { left: '12%', right: '5%', top: '5%', bottom: '15%' },
                                     xAxis: { type: 'category', boundaryGap: false, data: days, axisLabel: { fontSize: 9, color: '#9ca3af' }, axisLine: { lineStyle: { color: '#e5e7eb' } }},
                                     yAxis: { type: 'value', splitLine: { lineStyle: { type: 'dashed', color: '#f3f4f6' } }, axisLabel: { show: false } },
-                                    series: [{
-                                        data: bytes, type: 'line', smooth: true, symbol: 'none', itemStyle: { color: '#000000' }, lineStyle: { width: 2 },
-                                        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(0,0,0,0.15)' }, { offset: 1, color: 'rgba(0,0,0,0)' }]) }
-                                    }]
+                                    series: [{ data: bytes, type: 'line', smooth: true, symbol: 'none', itemStyle: { color: '#000000' }, lineStyle: { width: 2 }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(0,0,0,0.15)' }, { offset: 1, color: 'rgba(0,0,0,0)' }]) } }]
                                 });
                             }
-                        } catch (e) { console.error("加载图表失败:", e); }
+                        } catch (e) {}
                     }
                 };
 
@@ -343,15 +250,23 @@
                         const data = await res.json();
                         servers.value = data.servers || [];
                         nodes.value = data.nodes || [];
-                        servers.value.forEach(s => {
-                            if(!newNodeParams[s.ip]) newNodeParams[s.ip] = { protocol: 'VLESS', port: 443, sni: '', relay_type: 'external', traffic_limit_gb: '', expire_date: '' };
-                        });
+                        servers.value.forEach(s => { if(!newNodeParams[s.ip]) newNodeParams[s.ip] = { protocol: 'VLESS', port: 443, sni: '', relay_type: 'external', traffic_limit_gb: '', expire_date: '' }; });
                         renderCharts();
                     } catch(e) {}
                 };
 
-                // VPS 与 Node 操作方法
-                const addVps = async () => { if(!newVps.value.ip || !newVps.value.name) return; await fetchApi('/api/vps', { method: 'POST', body: JSON.stringify(newVps.value) }); newVps.value = { name: '', ip: '' }; refreshData(); };
+                // 🌟 添加了 try-catch 以暴露报错
+                const addVps = async () => { 
+                    if(!newVps.value.ip || !newVps.value.name) return; 
+                    try {
+                        await fetchApi('/api/vps', { method: 'POST', body: JSON.stringify(newVps.value) }); 
+                        newVps.value = { name: '', ip: '' }; 
+                        refreshData(); 
+                    } catch (e) {
+                        console.error("接入机器失败:", e);
+                    }
+                };
+
                 const deleteVps = async (ip) => { if(confirm('删除机器将清理其下所有节点配置！')) { await fetchApi('/api/vps?ip=' + ip, { method: 'DELETE' }); refreshData(); } };
                 const getNodesByIp = (ip) => nodes.value.filter(n => n.vps_ip === ip);
                 const getVpsName = (ip) => servers.value.find(s => s.ip === ip)?.name || ip;
@@ -361,35 +276,22 @@
                     const params = newNodeParams[ip];
                     if(!params.port) return alert('端口不能为空');
                     let limitBytes = params.traffic_limit_gb ? Math.floor(parseFloat(params.traffic_limit_gb) * 1024 * 1024 * 1024) : 0;
-                    let expireTs = params.expire_date ? new Date(params.expire_date).getTime() : 0;
-                    let payload = { id: Date.now().toString(), uuid: crypto.randomUUID(), vps_ip: ip, protocol: params.protocol, port: params.port, traffic_limit: limitBytes, expire_time: expireTs };
-                    
+                    let payload = { id: Date.now().toString(), uuid: crypto.randomUUID(), vps_ip: ip, protocol: params.protocol, port: params.port, traffic_limit: limitBytes, expire_time: 0 };
                     if (params.protocol === 'Reality') { const keys = generateRealityKeys(); payload.sni = params.sni; payload.private_key = keys.privateKey; payload.public_key = keys.publicKey; payload.short_id = keys.shortId; } 
-                    else if (params.protocol === 'Hysteria2') { const nicheDomains = ["www.chiba-u.ac.jp", "www.tsukuba.ac.jp", "www.jma.go.jp", "www.epfl.ch", "www.su.se", "www.tu-berlin.de"]; payload.sni = nicheDomains[Math.floor(Math.random() * nicheDomains.length)]; } 
-                    else if (params.protocol === 'dokodemo-door') { payload.relay_type = params.relay_type; if (params.relay_type === 'external') { payload.target_ip = params.target_ip; payload.target_port = params.target_port; } else { payload.target_id = params.target_id; } }
-                    
+                    else if (params.protocol === 'Hysteria2') { const nicheDomains = ["www.chiba-u.ac.jp"]; payload.sni = nicheDomains[0]; } 
                     await fetchApi('/api/nodes', { method: 'POST', body: JSON.stringify(payload) }); refreshData();
                 };
 
                 const deleteNode = async (id) => { await fetchApi('/api/nodes?id=' + id, { method: 'DELETE' }); refreshData(); };
                 const toggleNode = async (id, status) => { await fetchApi('/api/nodes', { method: 'PUT', body: JSON.stringify({ id: id, enable: status }) }); refreshData(); };
-                const resetTraffic = async (id) => { if(confirm('确定清空该节点的已用流量？')) { await fetchApi('/api/nodes', { method: 'PUT', body: JSON.stringify({ id: id, reset_traffic: true }) }); refreshData(); } };
+                const resetTraffic = async (id) => { if(confirm('清空已用流量？')) { await fetchApi('/api/nodes', { method: 'PUT', body: JSON.stringify({ id: id, reset_traffic: true }) }); refreshData(); } };
 
-                // 使用 Hash 值作为安装 Token，防止明文泄露
                 const generateCmd = (ip) => `apt-get update -y && apt-get install -y curl && bash <(curl -sL https://raw.githubusercontent.com/a62169722/KUI/main/vps/kui.sh) --api "${currentDomain}" --ip "${ip}" --token "${authKey.value}"`;
                 const generateSubLink = (ip) => `${currentDomain}/api/sub?ip=${ip}&token=${authKey.value}`;
                 const copyCommand = (text, msg = '部署指令已复制！') => navigator.clipboard.writeText(text).then(() => alert(msg));
 
-                // 声明周期挂载
-                onMounted(() => { 
-                    if (authKey.value) { isLoggedIn.value = true; refreshData(); startPolling(); } 
-                    document.addEventListener('visibilitychange', handleVisibilityChange);
-                });
-
-                onUnmounted(() => { 
-                    stopPolling(); 
-                    document.removeEventListener('visibilitychange', handleVisibilityChange); 
-                });
+                onMounted(() => { if (authKey.value) { isLoggedIn.value = true; refreshData(); startPolling(); } document.addEventListener('visibilitychange', handleVisibilityChange); });
+                onUnmounted(() => { stopPolling(); document.removeEventListener('visibilitychange', handleVisibilityChange); });
 
                 return { isLoggedIn, password, login, logout, servers, nodes, newVps, newNodeParams, isOnline, formatBytes, formatDate, getTrafficPercent, refreshData, addVps, deleteVps, getNodesByIp, getAllOtherNodes, getVpsName, addNode, deleteNode, toggleNode, resetTraffic, generateCmd, generateSubLink, copyCommand };
             }
