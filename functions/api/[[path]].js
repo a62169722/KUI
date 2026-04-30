@@ -1,6 +1,6 @@
 // ==========================================
 // KUI Serverless 聚合网关后端 - 零配置全自动建表完全体
-// (包含：全自动建表/热升级 + 7大协议 + Argo全自动 + TUIC修复 + 探针高阶监控吸收)
+// (包含：系统重命名 + 独立订阅 Token 解耦 + 心跳引擎)
 // ==========================================
 
 async function sha256(text) {
@@ -8,9 +8,8 @@ async function sha256(text) {
     return Array.from(new Uint8Array(buffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// 🌟 终极进化：真正的零配置部署，全自动生成表结构与索引，并无缝兼容老版本热升级
+// 🌟 终极进化：全自动生成表结构与索引，无缝兼容老版本热升级
 async function ensureDbSchema(db) {
-    // 1. 全自动初始化所有表结构 (新用户首次登录或探针心跳时触发)
     const initQueries = [
         `CREATE TABLE IF NOT EXISTS servers (
             ip TEXT PRIMARY KEY,
@@ -33,7 +32,8 @@ async function ensureDbSchema(db) {
             traffic_limit INTEGER DEFAULT 0, 
             traffic_used INTEGER DEFAULT 0, 
             expire_time INTEGER DEFAULT 0, 
-            enable INTEGER DEFAULT 1
+            enable INTEGER DEFAULT 1,
+            sub_token TEXT
         )`,
         `CREATE TABLE IF NOT EXISTS nodes (
             id TEXT PRIMARY KEY,
@@ -63,49 +63,79 @@ async function ensureDbSchema(db) {
             timestamp INTEGER NOT NULL,
             FOREIGN KEY(ip) REFERENCES servers(ip) ON DELETE CASCADE
         )`,
-        `CREATE INDEX IF NOT EXISTS idx_traffic_ip_time ON traffic_stats(ip, timestamp)`
+        `CREATE INDEX IF NOT EXISTS idx_traffic_ip_time ON traffic_stats(ip, timestamp)`,
+        
+        // 🌟 新增：系统配置表，用于记录前端面板的活跃心跳与全局设置
+        `CREATE TABLE IF NOT EXISTS sys_config (
+            key TEXT PRIMARY KEY, 
+            val TEXT, 
+            ts INTEGER
+        )`
     ];
 
     for (let query of initQueries) {
-        try { await db.prepare(query).run(); } catch (e) { /* 忽略已存在的报错 */ }
+        try {
+            await db.prepare(query).run();
+        } catch (e) {
+            // 忽略已存在的报错
+        }
     }
 
-    // 2. 向下兼容老版本用户 (热升级：如果表已存在但缺字段，则自动追加)
-    try { await db.prepare("SELECT username FROM nodes LIMIT 1").first(); } 
-    catch (e) { try { await db.prepare("ALTER TABLE nodes ADD COLUMN username TEXT DEFAULT 'admin'").run(); } catch(e){} }
+    // 热升级：兼容老版本，自动补齐缺失字段
+    try { 
+        await db.prepare("SELECT username FROM nodes LIMIT 1").first(); 
+    } catch (e) { 
+        try { await db.prepare("ALTER TABLE nodes ADD COLUMN username TEXT DEFAULT 'admin'").run(); } catch(e){} 
+    }
 
-    try { await db.prepare("SELECT disk FROM servers LIMIT 1").first(); } 
-    catch (e) {
+    try { 
+        await db.prepare("SELECT disk FROM servers LIMIT 1").first(); 
+    } catch (e) {
         const newCols = [
-            'disk INTEGER DEFAULT 0', 
-            'load TEXT DEFAULT ""', 
-            'uptime TEXT DEFAULT ""', 
-            'net_in_speed INTEGER DEFAULT 0', 
-            'net_out_speed INTEGER DEFAULT 0', 
-            'tcp_conn INTEGER DEFAULT 0', 
-            'udp_conn INTEGER DEFAULT 0'
+            'disk INTEGER DEFAULT 0', 'load TEXT DEFAULT ""', 'uptime TEXT DEFAULT ""', 
+            'net_in_speed INTEGER DEFAULT 0', 'net_out_speed INTEGER DEFAULT 0', 
+            'tcp_conn INTEGER DEFAULT 0', 'udp_conn INTEGER DEFAULT 0'
         ];
         for (let col of newCols) { 
             try { await db.prepare(`ALTER TABLE servers ADD COLUMN ${col}`).run(); } catch(err){} 
         }
     }
+
+    // 热升级：兼容没有 sys_config 表的老用户
+    try { 
+        await db.prepare("SELECT val FROM sys_config LIMIT 1").first(); 
+    } catch (e) { 
+        try { await db.prepare("CREATE TABLE IF NOT EXISTS sys_config (key TEXT PRIMARY KEY, val TEXT, ts INTEGER)").run(); } catch(err){} 
+    }
+
+    // 热升级：兼容老用户没有 sub_token 字段
+    try { 
+        await db.prepare("SELECT sub_token FROM users LIMIT 1").first(); 
+    } catch (e) { 
+        try { await db.prepare("ALTER TABLE users ADD COLUMN sub_token TEXT").run(); } catch(err){} 
+    }
 }
 
 async function verifyAuth(authHeader, db, env) {
     if (!authHeader) return null;
+    
     const adminUser = env.ADMIN_USERNAME || "admin";
     const adminPass = env.ADMIN_PASSWORD || "admin";
 
-    if (authHeader === adminPass || authHeader === await sha256(adminPass)) return adminUser;
+    // 探针或初始验证逻辑
+    if (authHeader === adminPass || authHeader === await sha256(adminPass)) {
+        return adminUser;
+    }
 
     const parts = authHeader.split('.');
     if (parts.length !== 3) return null;
+    
     const [b64User, timestamp, clientSig] = parts;
-
-    if (Math.abs(Date.now() - parseInt(timestamp)) > 300000) return null;
+    if (Math.abs(Date.now() - parseInt(timestamp)) > 300000) return null; // 5分钟时间戳防重放
 
     const username = atob(b64User);
     let baseKeyHex;
+    
     if (username === adminUser) {
         baseKeyHex = await sha256(adminPass);
     } else {
@@ -114,6 +144,7 @@ async function verifyAuth(authHeader, db, env) {
         baseKeyHex = u.password;
     }
 
+    // 验证签名
     const keyBytes = new Uint8Array(baseKeyHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
     const key = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
     const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(username + timestamp));
@@ -129,7 +160,18 @@ export async function onRequest(context) {
     const action = params.path ? params.path[0] : ''; 
     const db = env.DB; 
 
-    // [1] Agent 探针上报接口 (带自我热修复机制)
+    // ==============================================
+    // 无鉴权或特殊鉴权接口区
+    // ==============================================
+
+    // 🌟 处理前端传来的面板活跃心跳
+    if (action === "ui_ping" && method === "POST") {
+        if (!(await verifyAuth(request.headers.get("Authorization"), db, env))) return new Response("Unauthorized", { status: 401 });
+        await db.prepare("INSERT OR REPLACE INTO sys_config (key, val, ts) VALUES ('ui_active', '1', ?)").bind(Date.now()).run();
+        return Response.json({ success: true });
+    }
+
+    // Agent 探针上报接口
     if (action === "report" && method === "POST") {
         if (!(await verifyAuth(request.headers.get("Authorization"), db, env))) return new Response("Unauthorized", { status: 401 });
         const data = await request.json(); 
@@ -149,6 +191,7 @@ export async function onRequest(context) {
         
         const stmts = [];
         let totalDelta = 0;
+        
         if (data.node_traffic && data.node_traffic.length > 0) {
             for (let nt of data.node_traffic) {
                 stmts.push(db.prepare("UPDATE nodes SET traffic_used = traffic_used + ? WHERE id = ?").bind(nt.delta_bytes, nt.id));
@@ -163,12 +206,25 @@ export async function onRequest(context) {
             }
         }
 
-        if (totalDelta > 0) stmts.push(db.prepare("INSERT INTO traffic_stats (ip, delta_bytes, timestamp) VALUES (?, ?, ?)").bind(data.ip, totalDelta, nowMs));
+        if (totalDelta > 0) {
+            stmts.push(db.prepare("INSERT INTO traffic_stats (ip, delta_bytes, timestamp) VALUES (?, ?, ?)").bind(data.ip, totalDelta, nowMs));
+        }
+        
         if (stmts.length > 0) await db.batch(stmts);
-        return Response.json({ success: true });
+
+        // 🌟 将心跳检测结果传回探针，决定探针下一秒是否挂入“极速2秒挡”
+        let fastMode = false;
+        try {
+            const uiActive = await db.prepare("SELECT ts FROM sys_config WHERE key = 'ui_active'").first();
+            if (uiActive && (nowMs - uiActive.ts < 20000)) {
+                fastMode = true;
+            }
+        } catch(e) {}
+
+        return Response.json({ success: true, fast_mode: fastMode });
     }
 
-    // [2] Agent 探针拉取配置接口
+    // Agent 探针拉取配置接口
     if (action === "config" && method === "GET") {
         if (!(await verifyAuth(request.headers.get("Authorization"), db, env))) return new Response("Unauthorized", { status: 401 });
         const ip = url.searchParams.get("ip");
@@ -194,13 +250,18 @@ export async function onRequest(context) {
         for (let node of machineNodes) {
             if (node.protocol === "dokodemo-door" && node.relay_type === "internal") {
                 const targetNode = await db.prepare("SELECT * FROM nodes WHERE id = ?").bind(node.target_id).first();
-                if (targetNode) node.chain_target = { ip: targetNode.vps_ip, port: targetNode.port, protocol: targetNode.protocol, uuid: targetNode.uuid, sni: targetNode.sni, public_key: targetNode.public_key, short_id: targetNode.short_id };
+                if (targetNode) {
+                    node.chain_target = { 
+                        ip: targetNode.vps_ip, port: targetNode.port, protocol: targetNode.protocol, 
+                        uuid: targetNode.uuid, sni: targetNode.sni, public_key: targetNode.public_key, short_id: targetNode.short_id 
+                    };
+                }
             }
         }
         return Response.json({ success: true, configs: machineNodes });
     }
 
-    // [3] 全量聚合订阅接口 (动态拼接全协议)
+    // 全量聚合订阅接口 (动态拼接全协议)
     if (action === "sub" && method === "GET") {
         const ip = url.searchParams.get("ip");
         const reqUser = url.searchParams.get("user");
@@ -208,12 +269,24 @@ export async function onRequest(context) {
         const adminUser = env.ADMIN_USERNAME || "admin";
 
         let isValid = false;
+        
+        // 🌟 订阅令牌解耦验证
         if (reqUser === adminUser) {
-            isValid = (token === await sha256(env.ADMIN_PASSWORD || "admin"));
+            let adminSubToken = await sha256(env.ADMIN_PASSWORD || "admin");
+            try { 
+                const r = await db.prepare("SELECT val FROM sys_config WHERE key='admin_sub_token'").first(); 
+                if(r && r.val) adminSubToken = r.val; 
+            } catch(e){}
+            // 管理员同时允许使用原密码 Hash 或新的 sub_token
+            isValid = (token === adminSubToken) || (token === await sha256(env.ADMIN_PASSWORD || "admin"));
         } else {
-            const u = await db.prepare("SELECT password FROM users WHERE username = ?").bind(reqUser).first();
-            if (u && token === u.password) isValid = true;
+            const u = await db.prepare("SELECT password, sub_token FROM users WHERE username = ?").bind(reqUser).first();
+            if (u) {
+                // 如果有独立的 sub_token，则必须匹配；否则兼容老的密码登录
+                isValid = (token === u.sub_token) || (!u.sub_token && token === u.password);
+            }
         }
+        
         if (!isValid) return new Response("Forbidden", { status: 403 });
 
         const now = Date.now();
@@ -262,11 +335,9 @@ export async function onRequest(context) {
         return new Response(btoa(unescape(encodeURIComponent(subLinks.join('\n')))), { headers: { "Content-Type": "text/plain; charset=utf-8" }});
     }
 
-    // [4] 面板登录接口 (触发全局建表与双轨鉴权)
+    // 面板登录接口
     if (action === "login" && method === "POST") {
-        // 第一时间执行数据库初始化或热升级，确保绝对容错
         await ensureDbSchema(db);
-        
         const username = await verifyAuth(request.headers.get("Authorization"), db, env);
         if (username) {
             return Response.json({ success: true, role: username === (env.ADMIN_USERNAME || "admin") ? 'admin' : 'user' });
@@ -275,47 +346,104 @@ export async function onRequest(context) {
     }
 
     // ==============================================
-    // 面板内部管理接口屏障
+    // 面板内部管理接口屏障 (严格鉴权)
     // ==============================================
     const currentUser = await verifyAuth(request.headers.get("Authorization"), db, env);
     const isAdmin = currentUser === (env.ADMIN_USERNAME || "admin");
     if (!currentUser) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     try {
+        // [GET] 面板核心数据拉取
         if (action === "data") {
             const servers = (await db.prepare("SELECT * FROM servers").all()).results;
             const nodes = isAdmin ? (await db.prepare("SELECT * FROM nodes").all()).results : (await db.prepare("SELECT * FROM nodes WHERE username = ?").bind(currentUser).all()).results;
             const users = isAdmin ? (await db.prepare("SELECT * FROM users").all()).results : (await db.prepare("SELECT * FROM users WHERE username = ?").bind(currentUser).all()).results;
-            return Response.json({ servers, nodes, users });
+            
+            // 🌟 动态返回系统站点名称
+            let siteTitle = "Cluster Gateway";
+            try { 
+                const r = await db.prepare("SELECT val FROM sys_config WHERE key='site_title'").first(); 
+                if(r && r.val) siteTitle = r.val; 
+            } catch(e){}
+            
+            // 🌟 返回专属订阅 Token 给前端渲染
+            let mySubToken = "";
+            if (isAdmin) { 
+                try { 
+                    const r = await db.prepare("SELECT val FROM sys_config WHERE key='admin_sub_token'").first(); 
+                    if(r && r.val) mySubToken = r.val; 
+                } catch(e){} 
+            } else { 
+                const u = await db.prepare("SELECT sub_token FROM users WHERE username = ?").bind(currentUser).first(); 
+                if(u && u.sub_token) mySubToken = u.sub_token; 
+            }
+
+            return Response.json({ servers, nodes, users, siteTitle, mySubToken });
         }
         
+        // 🌟 [POST] 管理员修改全局系统名称
+        if (action === "settings" && method === "POST" && isAdmin) {
+            const { site_title } = await request.json();
+            await db.prepare("INSERT OR REPLACE INTO sys_config (key, val, ts) VALUES ('site_title', ?, ?)").bind(site_title, Date.now()).run();
+            return Response.json({ success: true });
+        }
+
+        // 🌟 [PUT] 普通用户修改个人密码
+        if (action === "user" && params.path[1] === "password" && method === "PUT") {
+            const { password } = await request.json();
+            if (isAdmin) {
+                return Response.json({error: "管理员密码受绝对安全保护，仅可通过 Cloudflare Pages 环境变量修改！"}, {status: 400});
+            }
+            const hash = await sha256(password);
+            await db.prepare("UPDATE users SET password = ? WHERE username = ?").bind(hash, currentUser).run();
+            return Response.json({ success: true });
+        }
+
+        // 🌟 [PUT] 系统重置订阅独立 Token
+        if (action === "user" && params.path[1] === "sub_token" && method === "PUT") {
+            const newToken = crypto.randomUUID();
+            if (isAdmin) {
+                await db.prepare("INSERT OR REPLACE INTO sys_config (key, val, ts) VALUES ('admin_sub_token', ?, ?)").bind(newToken, Date.now()).run();
+            } else {
+                await db.prepare("UPDATE users SET sub_token = ? WHERE username = ?").bind(newToken, currentUser).run();
+            }
+            return Response.json({ success: true, token: newToken });
+        }
+
+        // 获取历史统计趋势
         if (action === "stats" && method === "GET" && isAdmin) {
             const query = `SELECT strftime('%m-%d', datetime(timestamp / 1000, 'unixepoch', 'localtime')) as day, SUM(delta_bytes) as total_bytes FROM traffic_stats WHERE ip = ? AND timestamp > ? GROUP BY day ORDER BY day ASC`;
             const { results } = await db.prepare(query).bind(url.searchParams.get("ip"), Date.now() - 604800000).all();
             return Response.json(results || []);
         }
         
+        // ================= 用户管理 =================
         if (action === "users" && isAdmin) {
             if (method === "POST") {
                 const { username, password, traffic_limit, expire_time } = await request.json();
                 const hash = await sha256(password);
-                await db.prepare("INSERT INTO users (username, password, traffic_limit, expire_time) VALUES (?, ?, ?, ?)").bind(username, hash, traffic_limit, expire_time).run();
+                const subToken = crypto.randomUUID(); // 为新用户自动生成独立的订阅 Token
+                await db.prepare("INSERT INTO users (username, password, traffic_limit, expire_time, sub_token) VALUES (?, ?, ?, ?, ?)").bind(username, hash, traffic_limit, expire_time, subToken).run();
                 return Response.json({ success: true });
             }
             if (method === "PUT") {
                 const { username, enable, reset_traffic } = await request.json();
-                if (reset_traffic) await db.prepare("UPDATE users SET traffic_used = 0 WHERE username = ?").bind(username).run();
-                else if (enable !== undefined) await db.prepare("UPDATE users SET enable = ? WHERE username = ?").bind(enable, username).run();
+                if (reset_traffic) {
+                    await db.prepare("UPDATE users SET traffic_used = 0 WHERE username = ?").bind(username).run();
+                } else if (enable !== undefined) {
+                    await db.prepare("UPDATE users SET enable = ? WHERE username = ?").bind(enable, username).run();
+                }
                 return Response.json({ success: true });
             }
             if (method === "DELETE") {
                 const target = url.searchParams.get("username");
                 await db.prepare("DELETE FROM users WHERE username = ?").bind(target).run();
-                await db.prepare("UPDATE nodes SET username = ? WHERE username = ?").bind(currentUser, target).run();
+                await db.prepare("UPDATE nodes SET username = ? WHERE username = ?").bind(currentUser, target).run(); // 节点资产归还管理员
                 return Response.json({ success: true });
             }
         }
         
+        // ================= VPS管理 =================
         if (action === "vps" && isAdmin) {
             if (method === "POST") {
                 const { ip, name } = await request.json();
@@ -333,6 +461,7 @@ export async function onRequest(context) {
             }
         }
 
+        // ================= 节点配置管理 =================
         if (action === "nodes" && isAdmin) {
             if (method === "POST") {
                 const n = await request.json();
@@ -346,8 +475,11 @@ export async function onRequest(context) {
             }
             if (method === "PUT") {
                 const { id, enable, reset_traffic } = await request.json();
-                if (reset_traffic) await db.prepare("UPDATE nodes SET traffic_used = 0 WHERE id = ?").bind(id).run();
-                else if (enable !== undefined) await db.prepare("UPDATE nodes SET enable = ? WHERE id = ?").bind(enable, id).run();
+                if (reset_traffic) {
+                    await db.prepare("UPDATE nodes SET traffic_used = 0 WHERE id = ?").bind(id).run();
+                } else if (enable !== undefined) {
+                    await db.prepare("UPDATE nodes SET enable = ? WHERE id = ?").bind(enable, id).run();
+                }
                 return Response.json({ success: true });
             }
             if (method === "DELETE") {
@@ -357,27 +489,42 @@ export async function onRequest(context) {
         }
 
         return new Response("Not Found", { status: 404 });
-    } catch (err) { return Response.json({ error: err.message }, { status: 500 }); }
+    } catch (err) { 
+        return Response.json({ error: err.message }, { status: 500 }); 
+    }
 }
 
-// Telegram 自动巡检告警 (Cron触发)
+// ==============================================
+// Telegram 自动巡检告警 (定时 Cron 触发)
+// ==============================================
 export async function onRequestScheduled(context) {
     const { env } = context;
     const db = env.DB;
     const nowMs = Date.now();
+    
     try {
+        // 查找超过 3 分钟 (180000ms) 未上报心跳，且还未发送过告警的机器
         const { results } = await db.prepare(`SELECT ip, name, last_report FROM servers WHERE last_report < ? AND alert_sent = 0`).bind(nowMs - 180000).all();
+        
         if (results && results.length > 0) {
-            const tgBotToken = env.TG_BOT_TOKEN; const tgChatId = env.TG_CHAT_ID;
+            const tgBotToken = env.TG_BOT_TOKEN; 
+            const tgChatId = env.TG_CHAT_ID;
             const updateStmts = [];
+            
             for (let vps of results) {
                 if (tgBotToken && tgChatId) {
                     const text = `⚠️ [KUI 节点失联告警]\n\n节点别名: ${vps.name}\n公网IP: ${vps.ip}\n最后在线: ${new Date(vps.last_report).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`;
-                    await fetch(`https://api.telegram.org/bot${tgBotToken}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: tgChatId, text }) });
+                    await fetch(`https://api.telegram.org/bot${tgBotToken}/sendMessage`, { 
+                        method: "POST", 
+                        headers: { "Content-Type": "application/json" }, 
+                        body: JSON.stringify({ chat_id: tgChatId, text }) 
+                    });
                 }
                 updateStmts.push(db.prepare("UPDATE servers SET alert_sent = 1 WHERE ip = ?").bind(vps.ip));
             }
             if (updateStmts.length > 0) await db.batch(updateStmts);
         }
-    } catch (error) {}
+    } catch (error) {
+        // Cron 触发器执行错误静默处理
+    }
 }
