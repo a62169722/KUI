@@ -1,9 +1,8 @@
 #!/bin/sh
 
 # ==========================================
-# KUI Serverless 集群节点 - 智能跨系统安装脚本
+# KUI Serverless 集群节点 - 智能跨系统安装脚本 (强制阿里云源版)
 # 支持: Ubuntu 18-24 / Debian 10-13 / Alpine Linux
-# 特性: 强制阿里云源极速安装
 # ==========================================
 
 # 1. 解析传入的参数
@@ -34,7 +33,7 @@ fi
 
 echo "=========================================="
 echo " 🚀 KUI Agent 智能安装启动中..."
-echo " 💻 识别到目标系统: ${OS}"
+echo " 💻 目标系统: ${OS}"
 echo " ⚡ 镜像配置: 强制使用阿里云 (Aliyun) 极速源"
 echo "=========================================="
 
@@ -53,8 +52,7 @@ else
 fi
 rm -rf /opt/kui /etc/sing-box/config.json
 
-# 🌟 核心新增：全自动强制换源阿里云
-echo "[2/6] ⚡ 正在配置阿里云极速镜像源..."
+echo "[2/6] ⚡ 正在强制配置阿里云镜像源..."
 if [ "$OS" = "alpine" ]; then
     sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 else
@@ -72,7 +70,8 @@ fi
 echo "[3/6] 📦 正在安装系统底层依赖..."
 if [ "$OS" = "alpine" ]; then
     apk update
-    apk add python3 curl openssl iptables coreutils bash tar
+    # 🌟 核心修复：在此处加入了 libc6-compat 和 gcompat 防止核心二进制报错 not found
+    apk add python3 curl openssl iptables coreutils bash tar libc6-compat gcompat iproute2
 else
     apt-get update -y
     apt-get install -y python3 curl openssl iptables coreutils bash tar
