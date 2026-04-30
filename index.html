@@ -18,7 +18,18 @@
         input:focus, select:focus { outline: none; box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.4); }
     </style>
 </head>
-<body class="bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-50 min-h-screen text-slate-700 font-sans p-4 md:p-8 selection:bg-indigo-200 selection:text-indigo-900">
+<body class="bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-50 min-h-screen text-slate-700 font-sans p-4 md:p-8 selection:bg-indigo-200 selection:text-indigo-900 relative">
+    
+    <!-- 🌟 全局右上角悬浮引流外链 -->
+    <div class="fixed top-3 right-3 md:top-6 md:right-8 z-[999] flex gap-2 md:gap-3">
+        <a href="https://www.youtube.com/@%E7%A7%91%E6%8A%80KKK" target="_blank" class="bg-white/70 backdrop-blur-xl border border-white/80 p-2 md:px-4 md:py-2 rounded-full shadow-md hover:shadow-lg hover:scale-105 active:scale-95 transition-all text-[11px] md:text-xs font-bold text-slate-600 hover:text-rose-600 flex items-center gap-1 cursor-pointer">
+            📺 <span class="hidden md:inline">Youtube频道</span>
+        </a>
+        <a href="https://github.com/a62169722/KUI" target="_blank" class="bg-white/70 backdrop-blur-xl border border-white/80 p-2 md:px-4 md:py-2 rounded-full shadow-md hover:shadow-lg hover:scale-105 active:scale-95 transition-all text-[11px] md:text-xs font-bold text-slate-600 hover:text-slate-900 flex items-center gap-1 cursor-pointer">
+            🐙 <span class="hidden md:inline">Github仓库</span>
+        </a>
+    </div>
+
     <div id="app" v-cloak class="max-w-6xl mx-auto space-y-8">
         
         <!-- ================= 登录界面 ================= -->
@@ -104,7 +115,7 @@
 
                 <!-- 服务器与节点管理板块 -->
                 <div v-if="activeTab === 'nodes'" class="space-y-8">
-                    <!-- 🌟 升级修复：接入机器表单 (增加了 OS 架构选择器) -->
+                    <!-- 接入机器表单 -->
                     <div class="bg-white/60 backdrop-blur-xl p-6 md:p-8 rounded-[2rem] border border-white shadow-xl shadow-slate-200/40 flex flex-col md:flex-row gap-4 items-end">
                         <div class="flex-1"><label class="block text-xs font-bold text-slate-400 mb-2 pl-2">服务器别名</label><input v-model="newVps.name" placeholder="例如: 日本软银 01" class="w-full bg-white/50 border border-white p-3 rounded-2xl transition hover:bg-white focus:bg-white"></div>
                         <div class="flex-1"><label class="block text-xs font-bold text-slate-400 mb-2 pl-2">公网 IP</label><input v-model="newVps.ip" placeholder="8.8.8.8" class="w-full bg-white/50 border border-white p-3 rounded-2xl transition hover:bg-white focus:bg-white"></div>
@@ -260,7 +271,7 @@
                                 <div v-if="getNodesByIp(vps.ip).length === 0" class="text-center text-slate-400 text-xs py-6 border-2 border-dashed border-slate-200 rounded-2xl font-medium">暂无节点配置，请在上方添加</div>
                             </div>
 
-                            <!-- 🌟 升级修复：底部操作区 (动态OS指令展示与反悔切换) -->
+                            <!-- 底部操作区 (动态OS指令展示与反悔切换) -->
                             <div class="p-4 md:p-6 bg-slate-100/50 border-t border-white grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div class="bg-slate-800 p-4 rounded-[1.25rem] group shadow-inner transition-colors">
                                     <div class="text-[10px] text-slate-400 font-bold uppercase mb-2 flex justify-between items-center">
@@ -324,12 +335,10 @@
                 const currentUser = ref(localStorage.getItem('kui_user') || ''); const authKey = ref(localStorage.getItem('kui_auth_key') || ''); const role = ref(localStorage.getItem('kui_role') || '');
                 const activeTab = ref('vps'); const servers = ref([]); const nodes = ref([]); const users = ref([]);
                 
-                // 🌟 修复：新增 OS 系统架构参数
                 const newVps = ref({ name: '', ip: '', os: 'debian' }); 
                 const newNodeParams = reactive({}); const newUser = reactive({ username: '', password: '', traffic_limit_gb: '', expire_date: '' });
                 const currentDomain = window.location.origin;
 
-                // 🌟 修复：从本地缓存读取每个 IP 对应的系统类型，防止刷新丢失
                 const deployOsMap = reactive(JSON.parse(localStorage.getItem('kui_deploy_os') || '{}'));
                 const saveOsMap = () => { localStorage.setItem('kui_deploy_os', JSON.stringify(deployOsMap)); };
 
@@ -338,7 +347,6 @@
                 const formatDate = (ts) => { if (!ts) return '永久'; const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
                 const getTrafficPercent = (used, limit) => { if (!limit || limit === 0) return 0; return Math.min((used / limit) * 100, 100); };
 
-                // 计算全局大盘数据
                 const globalOnline = computed(() => servers.value.filter(s => isOnline(s.last_report)).length);
                 const globalTraffic = computed(() => nodes.value.reduce((sum, n) => sum + (parseFloat(n.traffic_used) || 0), 0));
                 const globalSpeedIn = computed(() => servers.value.reduce((sum, s) => sum + (parseFloat(s.net_in_speed) || 0), 0));
@@ -374,7 +382,6 @@
                         servers.value = data.servers || []; nodes.value = data.nodes || []; users.value = data.users || [];
                         servers.value.forEach(s => { 
                             if(!newNodeParams[s.ip]) newNodeParams[s.ip] = { protocol: 'Reality', port: 443, username: 'admin', sni: '', relay_type: 'external', traffic_limit_gb: '', expire_date: '' }; 
-                            // 兜底保障：如果之前没选过 OS，默认给 debian
                             if(!deployOsMap[s.ip]) deployOsMap[s.ip] = 'debian';
                         });
                         renderCharts();
@@ -397,7 +404,6 @@
                 const deleteUser = async (username) => { if(confirm('⚠️ 确定删除用户？节点将归还给管理员。')) { await fetchApi(`/api/users?username=${username}`, { method: 'DELETE' }); refreshData(); } };
                 const resetUserTraffic = async (username) => { await fetchApi('/api/users', { method: 'PUT', body: JSON.stringify({ username, reset_traffic: true }) }); refreshData(); };
 
-                // 🌟 修复：接入机器时，不仅请求后端，还将 OS 保存到本地用于生成不同架构的指令
                 const addVps = async () => { 
                     if(!newVps.value.ip || !newVps.value.name) return alert('请输入名称和IP');
                     deployOsMap[newVps.value.ip] = newVps.value.os;
@@ -435,7 +441,6 @@
                 const startPolling = () => { if (!timer) timer = setInterval(() => { if (isLoggedIn.value) refreshData(); }, 30000); };
                 const stopPolling = () => { if (timer) clearInterval(timer); timer = null; };
                 
-                // 🌟 修复：智能根据系统类型 (Debian vs Alpine) 动态生成对应的 Linux 安装指令
                 const generateCmd = (ip) => {
                     const osType = deployOsMap[ip] || 'debian';
                     const scriptUrl = "https://raw.githubusercontent.com/a62169722/KUI/main/vps/kui.sh";
