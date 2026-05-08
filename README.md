@@ -1,5 +1,9 @@
-# K-UI VPS Cluster Gateway | 群控VPS网关面板 🚀
+## 🤝 参与贡献 (Contributing)
 
+如果你喜欢这个项目，欢迎提交 Pull Request，或者给个 ⭐ **Star** 支持一下！
+
+# K-UI VPS Cluster Gateway | 群控VPS网关面板 🚀
+## 已知问题，IPV6没有适配，IPV6只能单节点添加vless argo节点可用，IPV4功能一切正常
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Version](https://img.shields.io/badge/version-v1.0-green.svg)
 ![Architecture](https://img.shields.io/badge/architecture-Serverless-orange.svg)
@@ -78,9 +82,6 @@ apt-get update -y && apt-get install -y curl && bash <(curl -sL [https://raw.git
 
 ### 客户端订阅
 点击右上角 **“🔗 复制订阅”**，将链接导入至 v2rayN、Clash Verge、Shadowrocket 等主流客户端即可自动解析（内置防封锁 SNI 与 16 字节高强度密码算法）。
-
-
-## 已知问题，IPV6没有适配，只能单节点添加vless argo节点可用
 
 
 ---
