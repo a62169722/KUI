@@ -58,10 +58,9 @@ else
     [ -f /etc/apt/sources.list ] && sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list
 fi
 
-echo "[3/6] 📦 正在安装底层网络依赖 (融合 fscarmen 防火墙机制)..."
+echo "[3/6] 📦 正在安装底层网络依赖..."
 if [ "$OS" = "alpine" ]; then
     apk update
-    # 🌟 修复：加入 iptables, ip6tables, iproute2 保障底层穿透
     apk add python3 curl openssl iptables ip6tables coreutils bash tar libc6-compat gcompat iproute2
 else
     apt-get update -y
@@ -152,5 +151,4 @@ echo "=========================================="
 echo " 🎉 KUI Agent 跨平台部署成功！"
 echo " 节点 IP: ${VPS_IP}"
 echo " 系统架构: ${OS}"
-echo " 提示: 所有底层防火墙及网络依赖已就绪。"
 echo "=========================================="
