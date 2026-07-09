@@ -8,6 +8,284 @@ async function sha256(text) {
     return Array.from(new Uint8Array(buffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+function formatIpForLink(ip) {
+    if (!ip || typeof ip !== 'string') return ip;
+    if (ip.startsWith('[') && ip.endsWith(']')) return ip;
+    if (ip.includes(':')) return `[${ip}]`;
+    return ip;
+}
+
+function parseVLESSLink(raw) {
+    try {
+        const schemeSep = raw.indexOf('://');
+        if (schemeSep < 0) return null;
+        let rest = raw.slice(schemeSep + 3);
+        const hashIdx = rest.indexOf('#');
+        let remark = '', hash = '';
+        if (hashIdx !== -1) { hash = rest.slice(hashIdx + 1); rest = rest.slice(0, hashIdx); }
+        const qIdx = rest.indexOf('?');
+        let queryPart = '';
+        if (qIdx !== -1) { queryPart = rest.slice(qIdx + 1); rest = rest.slice(0, qIdx); }
+
+        const findAt = (s) => {
+            const idx = s.lastIndexOf('@');
+            if (idx >= 0) return [idx, 1];
+            const encIdx = s.lastIndexOf('%40');
+            if (encIdx >= 0) return [encIdx, 3];
+            return [-1, 0];
+        };
+        const [atIdx, sepLen] = findAt(rest);
+        if (atIdx < 0) return null;
+        const safeDecode = (s) => { try { return decodeURIComponent(s); } catch(e) { return s; } };
+        const uuid = safeDecode(rest.slice(0, atIdx));
+        let hostPart = rest.slice(atIdx + sepLen);
+        let port = 443;
+        if (hostPart.startsWith('[')) {
+            const bracketEnd = hostPart.indexOf(']');
+            if (bracketEnd < 0) return null;
+            const ipv6Addr = hostPart.slice(0, bracketEnd + 1);
+            const afterBracket = hostPart.slice(bracketEnd + 1);
+            if (afterBracket.startsWith(':')) {
+                const portMatch = afterBracket.slice(1).match(/^\d+/);
+                if (portMatch) port = parseInt(portMatch[0], 10);
+            }
+            hostPart = ipv6Addr;
+        } else {
+            let hostWithoutPort = hostPart;
+            const colonIdx = hostPart.lastIndexOf(':');
+            if (colonIdx > 0 && !hostPart.slice(0, colonIdx).includes(':')) {
+                const pStr = hostPart.slice(colonIdx + 1);
+                if (/^\d+$/.test(safeDecode(pStr))) {
+                    port = parseInt(pStr, 10);
+                    hostWithoutPort = hostPart.slice(0, colonIdx);
+                }
+            }
+            hostPart = safeDecode(hostWithoutPort);
+        }
+        const params = new URLSearchParams(queryPart);
+        const pbk = params.get('pbk') || '';
+        const sid = params.get('sid') || '';
+        const sni = safeDecode(params.get('sni') || '') || hostPart;
+        const flow = params.get('flow') || '';
+        const network = params.get('type') || 'tcp';
+        const host = safeDecode(params.get('host') || '') || '';
+        const path = safeDecode(params.get('path') || '') || '';
+        const name = hash ? (() => { try { return decodeURIComponent(hash); } catch(e) { return hash; } })() : '';
+        const isReality = params.get('security') === 'reality' || !!pbk;
+        const protocol = isReality ? 'Reality' : 'VLESS';
+        if (!uuid || !hostPart) return null;
+        return {
+            protocol, name, address: hostPart, port, uuid, password: '', sni,
+            public_key: pbk, short_id: sid, flow, network: network.toLowerCase(), host, path, extra: '', enable: 1
+        };
+    } catch (e) { return null; }
+}
+
+function parseHysteria2Link(raw) {
+    try {
+        let prefixLen = 11;
+        if (raw.startsWith('hy2://')) prefixLen = 5;
+        else if (raw.startsWith('hysteria2://')) prefixLen = 12;
+        else if (raw.startsWith('hysteria://')) prefixLen = 10;
+        let rest = raw.slice(prefixLen).replace(/^\/+/, '');
+        const hashIdx = rest.indexOf('#');
+        let remark = '';
+        if (hashIdx !== -1) { remark = rest.slice(hashIdx + 1); rest = rest.slice(0, hashIdx); }
+        const qIdx = rest.indexOf('?');
+        let queryPart = '';
+        if (qIdx !== -1) { queryPart = rest.slice(qIdx + 1); rest = rest.slice(0, qIdx); }
+        const params = new URLSearchParams(queryPart);
+        let password = '';
+        let host = '';
+        let port = 443;
+        const safeDecode = (s) => { try { return decodeURIComponent(s); } catch(e) { return s; } };
+        const findAt = (s) => {
+            const idx = s.lastIndexOf('@');
+            if (idx >= 0) return [idx, 1];
+            const encIdx = s.lastIndexOf('%40');
+            if (encIdx >= 0) return [encIdx, 3];
+            return [-1, 0];
+        };
+        const [atIdx, sepLen] = findAt(rest);
+        if (atIdx >= 0) {
+            password = safeDecode(rest.slice(0, atIdx));
+            host = safeDecode(rest.slice(atIdx + sepLen));
+        } else {
+            password = params.get('password') || '';
+            host = safeDecode(rest);
+        }
+        const colonIdx = host.lastIndexOf(':');
+        if (colonIdx !== -1) {
+            const maybePort = host.slice(colonIdx + 1);
+            if (/^\d+$/.test(maybePort)) {
+                port = parseInt(maybePort, 10);
+                host = host.slice(0, colonIdx);
+            }
+        }
+        const sni = safeDecode(params.get('sni') || '') || host;
+        const name = remark ? (() => { try { return decodeURIComponent(remark); } catch (e) { return remark; } })() : '';
+        if (!host || isNaN(port)) return null;
+        return {
+            protocol: 'Hysteria2', name, address: host, port, uuid: password, password, sni,
+            public_key: '', short_id: '', flow: '', network: 'udp', host: '', path: '', extra: '', enable: 1
+        };
+    } catch (e) {
+        return null;
+    }
+}
+
+function base64ToUtf8(str) {
+    try {
+        const s = str.replace(/-/g, '+').replace(/_/g, '/');
+        const pad = s.length % 4;
+        const padded = pad ? s + '='.repeat(4 - pad) : s;
+        const binary = atob(padded);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        return new TextDecoder().decode(bytes);
+    } catch (e) {
+        return atob(str);
+    }
+}
+
+function safeHashDecode(url) {
+    const raw = (url.hash && url.hash.slice(1)) || '';
+    if (!raw) return '';
+    try { return decodeURIComponent(raw); } catch (e) { return raw; }
+}
+
+function resolveUrlPortForHysteria2(url) {
+    if (url.port && String(url.port) !== '') return parseInt(url.port);
+    const insecure = (url.searchParams.get('insecure') || url.searchParams.get('allowinsecure') || '').toString();
+    const mbs = (url.searchParams.get('downmbps') || url.searchParams.get('upmbps') || '0').toString();
+    if (insecure === '1' || parseInt(mbs, 10) > 0) return 443;
+    const path = (url.pathname && url.pathname.replace(/^\//, '')) || '';
+    const p = parseInt(path, 10);
+    return Number.isFinite(p) && p > 0 ? p : 443;
+}
+
+async function parseThirdPartySubscription(content) {
+    let nodes = [];
+    let decoded = content;
+    const trimmed = content.trim();
+    if (!trimmed.includes('://')) {
+        try {
+            decoded = base64ToUtf8(trimmed);
+        } catch (e) {
+            decoded = content;
+        }
+    }
+    const lines = decoded.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const protocolCounts = {};
+    const debug = { totalLines: lines.length, matched: 0, hy2Found: false, hy2Count: 0, firstFewLines: [], hy2Line: '', allPrefixes: {}, unmatchedPrefixes: {}, contentPreview: decoded.substring(0, 3000) };
+    for (const raw of lines) {
+        if (debug.firstFewLines.length < 5) debug.firstFewLines.push(raw.substring(0, 120));
+        const rawLC = raw.toLowerCase();
+        const sep = rawLC.indexOf('://');
+        const pf = sep > 0 ? rawLC.substring(0, sep + 3) : rawLC.substring(0, Math.min(rawLC.length, 40));
+        debug.allPrefixes[pf] = (debug.allPrefixes[pf] || 0) + 1;
+        if ((rawLC.startsWith('hysteria2://') || rawLC.startsWith('hy2://') || rawLC.startsWith('hysteria://')) && !debug.hy2Line) {
+            debug.hy2Found = true;
+            debug.hy2Count++;
+            if (debug.hy2Count <= 1) debug.hy2Line = raw.substring(0, 160);
+        }
+        let node = null;
+        try {
+            if (rawLC.startsWith('vmess://')) {
+                node = {
+                    protocol: 'VMess', name: '', address: '', port: 443, uuid: '', password: '', sni: '',
+                    public_key: '', short_id: '', flow: '', network: 'tcp', host: '', path: '', extra: raw, enable: 1
+                };
+                try {
+                    const jsonStr = base64ToUtf8(raw.slice(8));
+                    const obj = JSON.parse(jsonStr);
+                    node.name = obj.ps || ''; node.address = obj.add || obj.host || ''; node.port = parseInt(obj.port) || 443;
+                    node.uuid = obj.id || obj.uuid || ''; node.sni = obj.sni || obj.host || obj.add || '';
+                    node.network = (obj.net || 'tcp').toLowerCase(); node.host = obj.host || ''; node.path = obj.path || '';
+                } catch (e) {}
+            } else if (rawLC.startsWith('vless://')) {
+                const parsed = parseVLESSLink(raw);
+                if (parsed) node = parsed;
+            } else if (rawLC.startsWith('trojan://')) {
+                const parsed = parseVLESSLink(raw);
+                if (parsed) { parsed.protocol = 'Trojan'; node = parsed; }
+            } else if (rawLC.startsWith('hysteria2://') || rawLC.startsWith('hy2://') || rawLC.startsWith('hysteria://')) {
+                const parsed = parseHysteria2Link(raw);
+                if (parsed) node = parsed;
+            } else if (rawLC.startsWith('tuic://')) {
+                const url = new URL(raw);
+                node = {
+                    protocol: 'TUIC', name: safeHashDecode(url), address: url.hostname, port: parseInt(url.port) || 443,
+                    uuid: url.username, password: url.password || '', sni: url.searchParams.get('sni') || url.hostname,
+                    public_key: '', short_id: '', flow: '', network: 'udp', host: '', path: '', extra: '', enable: 1
+                };
+            } else if (rawLC.startsWith('naive+https://') || rawLC.startsWith('naive://')) {
+                const url = new URL(raw);
+                node = {
+                    protocol: 'Naive', name: safeHashDecode(url), address: url.hostname, port: parseInt(url.port) || 443,
+                    uuid: url.username, password: url.password || '', sni: url.searchParams.get('sni') || url.hostname,
+                    public_key: '', short_id: '', flow: '', network: 'tcp', host: '', path: '', extra: '', enable: 1
+                };
+            } else if (rawLC.startsWith('ss://')) {
+                const rest = raw.slice(5).replace(/#.*$/, '');
+                let host = '', port = 8388, password = '', method = '';
+                if (rest.includes('@')) {
+                    const [uinfo, saddr] = rest.split('@');
+                    const decodedUi = base64ToUtf8(uinfo);
+                    const [m, p] = decodedUi.split(':');
+                    method = m || 'aes-256-gcm';
+                    password = p || '';
+                    const [h, pStr] = saddr.split(':');
+                    host = h;
+                    port = parseInt(pStr) || 8388;
+                } else {
+                    const decodedRest = base64ToUtf8(rest);
+                    const parts = decodedRest.split('@');
+                    if (parts.length === 2) {
+                        const [uinfo2, saddr2] = parts;
+                        const [m, p] = uinfo2.split(':');
+                        method = m || 'aes-256-gcm';
+                        password = p || '';
+                        const [h, pStr] = saddr2.split(':');
+                        host = h;
+                        port = parseInt(pStr) || 8388;
+                    }
+                }
+                node = {
+                    protocol: 'Socks5', name: '', address: host, port: port, uuid: password, password, sni: host,
+                    public_key: '', short_id: '', flow: '', network: 'tcp', host: '', path: '', extra: JSON.stringify({method}), enable: 1
+                };
+            } else if (rawLC.startsWith('ssr://')) {
+                const b64 = raw.slice(6).replace(/#.*$/, '');
+                const decoded = base64ToUtf8(b64);
+                const base = decoded.split('/?')[0];
+                const bpms = base.split(':');
+                if (bpms.length >= 5) {
+                    const method = bpms[0], password = base64ToUtf8(bpms[1]), host = bpms[2], port = bpms[3];
+                    node = {
+                        protocol: 'Socks5', name: '', address: host, port: parseInt(port) || 8388, uuid: password, password,
+                        sni: host, public_key: '', short_id: '', flow: '', network: 'tcp', host: '', path: '',
+                        extra: JSON.stringify({method, protocol: bpms[4], obfs: bpms[5]}), enable: 1
+                    };
+                }
+            } else {
+                const sep = raw.indexOf('://');
+                const pf = sep > 0 ? rawLC.substring(0, sep + 3) : rawLC.substring(0, Math.min(rawLC.length, 30));
+                debug.unmatchedPrefixes[pf] = (debug.unmatchedPrefixes[pf] || 0) + 1;
+            }
+        } catch (e) {
+            node = null;
+        }
+        if (node && node.address && node.port) {
+            node.id = crypto.randomUUID();
+            nodes.push(node);
+            protocolCounts[node.protocol] = (protocolCounts[node.protocol] || 0) + 1;
+            debug.matched++;
+        }
+    }
+    return { nodes, protocolCounts, debug };
+}
+
 async function ensureDbSchema(db) {
     const initQueries = [
         `CREATE TABLE IF NOT EXISTS servers (ip TEXT PRIMARY KEY, name TEXT NOT NULL, cpu INTEGER DEFAULT 0, mem REAL DEFAULT 0, last_report INTEGER DEFAULT 0, alert_sent INTEGER DEFAULT 0, disk INTEGER DEFAULT 0, load TEXT DEFAULT "", uptime TEXT DEFAULT "", net_in_speed INTEGER DEFAULT 0, net_out_speed INTEGER DEFAULT 0, tcp_conn INTEGER DEFAULT 0, udp_conn INTEGER DEFAULT 0)`,
@@ -15,7 +293,10 @@ async function ensureDbSchema(db) {
         `CREATE TABLE IF NOT EXISTS nodes (id TEXT PRIMARY KEY, uuid TEXT NOT NULL, vps_ip TEXT NOT NULL, protocol TEXT NOT NULL, port INTEGER NOT NULL, sni TEXT, private_key TEXT, public_key TEXT, short_id TEXT, relay_type TEXT, target_ip TEXT, target_port INTEGER, target_id TEXT, enable INTEGER DEFAULT 1, traffic_used INTEGER DEFAULT 0, traffic_limit INTEGER DEFAULT 0, expire_time INTEGER DEFAULT 0, username TEXT DEFAULT 'admin', FOREIGN KEY(vps_ip) REFERENCES servers(ip) ON DELETE CASCADE)`,
         `CREATE TABLE IF NOT EXISTS traffic_stats (id INTEGER PRIMARY KEY AUTOINCREMENT, ip TEXT NOT NULL, delta_bytes INTEGER DEFAULT 0, timestamp INTEGER NOT NULL, FOREIGN KEY(ip) REFERENCES servers(ip) ON DELETE CASCADE)`,
         `CREATE INDEX IF NOT EXISTS idx_traffic_ip_time ON traffic_stats(ip, timestamp)`,
-        `CREATE TABLE IF NOT EXISTS sys_config (key TEXT PRIMARY KEY, val TEXT, ts INTEGER)`
+        `CREATE TABLE IF NOT EXISTS sys_config (key TEXT PRIMARY KEY, val TEXT, ts INTEGER)`,
+        `CREATE TABLE IF NOT EXISTS proxy_ctrl_servers (ip TEXT PRIMARY KEY, details TEXT, last_seen INTEGER)`,
+        `CREATE TABLE IF NOT EXISTS server_logs (ip TEXT PRIMARY KEY, logs TEXT, updated_at INTEGER)`,
+        `CREATE TABLE IF NOT EXISTS proxy_slot_map (key TEXT PRIMARY KEY, value TEXT)`
     ];
     for (let query of initQueries) { try { await db.prepare(query).run(); } catch (e) {} }
 
@@ -30,8 +311,9 @@ async function ensureDbSchema(db) {
             expire_date TEXT DEFAULT '', bandwidth TEXT DEFAULT '', traffic_limit TEXT DEFAULT '', agent_os TEXT DEFAULT 'debian',
             ping_ct TEXT DEFAULT '0', ping_cu TEXT DEFAULT '0', ping_cm TEXT DEFAULT '0', ping_bd TEXT DEFAULT '0',
             monthly_rx TEXT DEFAULT '0', monthly_tx TEXT DEFAULT '0', last_rx TEXT DEFAULT '0', last_tx TEXT DEFAULT '0', 
-            reset_month TEXT DEFAULT '', history TEXT DEFAULT '{}', is_hidden TEXT DEFAULT 'false', virt TEXT DEFAULT '', reset_day TEXT DEFAULT '1'
-        )`
+            reset_month TEXT DEFAULT '', history TEXT DEFAULT '{}', is_hidden TEXT DEFAULT 'false', virt TEXT DEFAULT '',             reset_day TEXT DEFAULT '1'
+        )`,
+        `CREATE TABLE IF NOT EXISTS proxy_servers (ip TEXT PRIMARY KEY, socks_ip TEXT, port INTEGER, user TEXT, pass TEXT, country TEXT DEFAULT '', enabled INTEGER DEFAULT 1, last_seen INTEGER)`
     ];
     for (let query of probeQueries) { try { await db.prepare(query).run(); } catch (e) {} }
 
@@ -39,6 +321,8 @@ async function ensureDbSchema(db) {
     try { await db.prepare("SELECT disk FROM servers LIMIT 1").first(); } catch (e) { const newCols = ['disk INTEGER DEFAULT 0', 'load TEXT DEFAULT ""', 'uptime TEXT DEFAULT ""', 'net_in_speed INTEGER DEFAULT 0', 'net_out_speed INTEGER DEFAULT 0', 'tcp_conn INTEGER DEFAULT 0', 'udp_conn INTEGER DEFAULT 0']; for (let col of newCols) { try { await db.prepare(`ALTER TABLE servers ADD COLUMN ${col}`).run(); } catch(err){} } }
     try { await db.prepare("SELECT sub_token FROM users LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE users ADD COLUMN sub_token TEXT").run(); } catch(err){} }
     try { await db.prepare("SELECT reset_day FROM probe_servers LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE probe_servers ADD COLUMN reset_day TEXT DEFAULT '1'").run(); } catch(e){} }
+    try { await db.prepare("SELECT socks5_enable FROM servers LIMIT 1").first(); } catch (e) { const s5Cols = ['socks5_enable INTEGER DEFAULT 0', 'socks5_addr TEXT DEFAULT ""', 'socks5_port INTEGER DEFAULT 0', 'socks5_user TEXT DEFAULT ""', 'socks5_pass TEXT DEFAULT ""']; for (let col of s5Cols) { try { await db.prepare(`ALTER TABLE servers ADD COLUMN ${col}`).run(); } catch(err){} } }
+    try { await db.prepare("SELECT socks5_mode FROM servers LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE servers ADD COLUMN socks5_mode TEXT DEFAULT 'global'").run(); } catch(err){} try { await db.prepare("ALTER TABLE servers ADD COLUMN socks5_domains TEXT DEFAULT ''").run(); } catch(err){} }
 
     // 初始化云端测速数据
     const checkNodes = await db.prepare("SELECT value FROM probe_settings WHERE key = 'cached_nodes_data'").first();
@@ -51,6 +335,12 @@ async function ensureDbSchema(db) {
             }
         } catch(e) {}
     }
+
+    const tpsQueries = [
+        `CREATE TABLE IF NOT EXISTS third_party_subscriptions (id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, is_enable INTEGER DEFAULT 1, added_at INTEGER, last_fetched_at INTEGER)`,
+        `CREATE TABLE IF NOT EXISTS third_party_nodes (id TEXT PRIMARY KEY, subscription_id TEXT NOT NULL, name TEXT, protocol TEXT NOT NULL, address TEXT NOT NULL, port INTEGER NOT NULL, uuid TEXT, password TEXT, sni TEXT, public_key TEXT, short_id TEXT, flow TEXT, network TEXT, host TEXT, path TEXT, extra TEXT, enable INTEGER DEFAULT 1, created_at INTEGER, FOREIGN KEY(subscription_id) REFERENCES third_party_subscriptions(id) ON DELETE CASCADE)`
+    ];
+    for (let query of tpsQueries) { try { await db.prepare(query).run(); } catch (e) {} }
 }
 
 async function verifyAuth(authHeader, db, env) {
@@ -219,6 +509,150 @@ async function handleProbeAPI(request, env, context, pathArray) {
 }
 
 // ==============================================
+// 住宅IP代理：优先桥接外部 Free-Residential-IP-Proxy-Controller；
+// 若未配置 PROXY_CTRL_URL，则回落到本地 D1 控制器（与外部控制器接口对齐）。
+// ==============================================
+async function proxyBridge(method, subPath, request, env) {
+    const ctrlUrl = env.PROXY_CTRL_URL;
+    if (!ctrlUrl) return await proxyLocal(method, subPath, request, env);
+    const currentOrigin = new URL(request.url).origin;
+    const targetOrigin = new URL(ctrlUrl).origin;
+    if (currentOrigin === targetOrigin) return await proxyLocal(method, subPath, request, env);
+    const target = ctrlUrl.replace(/\/+$/, '') + '/api/' + subPath;
+    let authHeader = '';
+    const ctrlUser = env.PROXY_CTRL_USER || env.ADMIN_USERNAME || '';
+    const ctrlPass = env.PROXY_CTRL_PASS || env.ADMIN_PASSWORD || '';
+    if (ctrlUser && ctrlPass) {
+      const encoded = btoa(`${ctrlUser}:${ctrlPass}`);
+      authHeader = `Basic ${encoded}`;
+    } else if (env.PROXY_CTRL_TOKEN) {
+      authHeader = env.PROXY_CTRL_TOKEN;
+    }
+    const init = { method, headers: { 'Content-Type': 'application/json', 'Authorization': authHeader } };
+    if (method === 'POST') { try { init.body = await request.clone().text(); } catch (e) {} }
+    console.log('[proxy-bridge] ->', method, target);
+    try {
+      const res = await fetch(target, init);
+      const text = await res.text();
+      console.log('[proxy-bridge] <-', method, target, 'status', res.status);
+      const ct = res.headers.get('content-type') || '';
+      const isJson = ct.includes('json');
+      return new Response(text, { status: res.status, headers: { 'Content-Type': isJson ? 'application/json' : 'text/plain' } });
+    } catch (e) {
+      console.error('[proxy-bridge] fetch failed:', e);
+      return new Response(JSON.stringify({ success: false, error: '代理控制器转发失败: ' + e.message }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+    }
+}
+
+async function proxyLocal(method, subPath, req, env) {
+    const db = env.DB;
+    await ensureDbSchema(db);
+    const url = new URL(req.url);
+    const proxyUser = env.PROXY_USER || 'proxy';
+    const proxyPass = env.PROXY_PASS || '888888';
+
+    if (subPath === 'config') {
+        if (method === 'GET') {
+            try {
+                const row = await db.prepare("SELECT value FROM probe_settings WHERE key = 'proxy_slot_map'").first();
+                let slotMap = { "0": "JP", "port": 7920 };
+                if (row && row.value) {
+                    try { slotMap = JSON.parse(row.value); } catch(e) {}
+                }
+                const rawCountry = (slotMap["0"] || slotMap.country || "JP").toString().toUpperCase();
+                const proxyCfg = { enabled: true, port: slotMap.port || 7920, user: env.PROXY_USER || 'proxy', pass: env.PROXY_PASS || '888888', country: rawCountry };
+                return new Response(JSON.stringify({ "0": rawCountry, "port": slotMap.port || 7920, "country": rawCountry, proxy: proxyCfg }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' } });
+            } catch (e) { return new Response(JSON.stringify({ success: false, error: "GET config failed: " + e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }); }
+        }
+        if (method === 'POST') {
+            try {
+                const data = await req.json();
+                const rawCountry = (data["0"] || data.country || "JP").toString().toUpperCase().trim();
+                const sanitized = { "0": rawCountry, "country": rawCountry, "port": parseInt(data.port) || 7920 };
+                if (data.switch_trigger) sanitized.switch_trigger = data.switch_trigger;
+                console.log('[proxy-config-save] writing to probe_settings:', JSON.stringify(sanitized));
+                await db.prepare("INSERT INTO probe_settings (key, value) VALUES ('proxy_slot_map', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(JSON.stringify(sanitized)).run();
+                const proxyCfg = { enabled: true, port: sanitized.port, user: env.PROXY_USER || 'proxy', pass: env.PROXY_PASS || '888888', country: rawCountry };
+                console.log('[proxy-config-save] success, returning:', JSON.stringify({ slot_map: sanitized }));
+                return new Response(JSON.stringify({ success: true, slot_map: sanitized, proxy: proxyCfg }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate' } });
+            } catch (e) { console.error('[proxy-config-save] FAILED:', e.message); return new Response(JSON.stringify({ success: false, error: "CONFIG_WRITE_ERR: " + e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }); }
+        }
+    }
+
+    if (subPath === 'report' && method === 'POST') {
+        try {
+            const data = await req.json();
+            if (data.details !== undefined) {
+                await db.prepare(`INSERT INTO proxy_ctrl_servers (ip, details, last_seen) VALUES (?1, ?2, ?3) ON CONFLICT(ip) DO UPDATE SET details = excluded.details, last_seen = excluded.last_seen`).bind(data.ip, JSON.stringify(data.details), Date.now()).run();
+            } else {
+                await db.prepare(`INSERT INTO proxy_ctrl_servers (ip, last_seen) VALUES (?1, ?2) ON CONFLICT(ip) DO UPDATE SET last_seen = excluded.last_seen`).bind(data.ip, Date.now()).run();
+            }
+            if (data.logs) {
+                await db.prepare(`INSERT INTO server_logs (ip, logs, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(ip) DO UPDATE SET logs = excluded.logs, updated_at = excluded.updated_at`).bind(data.ip, data.logs, Date.now()).run();
+            }
+            return new Response("OK", { status: 200 });
+        } catch (e) { return new Response("Error", { status: 500 }); }
+    }
+
+    if (subPath === 'proxies' && method === 'GET') {
+        const cutoff = Date.now() - 120000;
+        await db.prepare('DELETE FROM proxy_ctrl_servers WHERE last_seen < ?').bind(cutoff).run();
+        const { results } = await db.prepare('SELECT ip, details FROM proxy_ctrl_servers').all();
+        const list = [];
+        if (results) {
+            for (const s of results) {
+                const details = JSON.parse(s.details || '[]');
+                const node = details.find(d => d.active) || details[0];
+                if (node) list.push(`socks5://${proxyUser}:${proxyPass}@${s.ip}:${node.port}#${node.country}_ActiveNode_${node.node_ip || 'IP'}`);
+            }
+        }
+        return new Response(list.join('\n'), { headers: { 'Content-Type': 'text/plain;charset=UTF-8' } });
+    }
+
+    if (subPath === 'nodes' && method === 'GET') {
+        const cutoff = Date.now() - 120000;
+        await db.prepare('DELETE FROM proxy_ctrl_servers WHERE last_seen < ?').bind(cutoff).run();
+        const { results } = await db.prepare(`SELECT s.ip, s.details, s.last_seen, l.logs FROM proxy_ctrl_servers s LEFT JOIN server_logs l ON s.ip = l.ip ORDER BY s.last_seen DESC`).all();
+        return new Response(JSON.stringify(results || []), { headers: { 'Content-Type': 'application/json' } });
+    }
+
+    if (subPath === 'countries' && method === 'GET') {
+        try {
+            const res = await fetch('https://www.vpngate.net/api/iphone/');
+            const text = await res.text();
+            const lines = text.split('\n');
+            const countries = new Set();
+            for (let i = 2; i < lines.length; i++) {
+                const parts = lines[i].split(',');
+                if (parts.length > 6) {
+                    const c = parts[6];
+                    if (c && c.length === 2 && c !== 'xx' && c !== '--') countries.add(c.toUpperCase());
+                }
+            }
+            const preset = ["US","JP","KR","SG","HK","TW","GB","DE","FR","NL","CA","AU","IN","VN","BR","AE","MY","TH","PH","ID","TR","ZA","IT","ES","RU","CH","SE","PL","NO","DK","FI","IE","AT","NZ","BE","PT","CZ","GR","HU","RO","BG","HR","SK","SI","LT","LV","EE","UA","RS","BA","CY","MT","IS","LU"];
+            return new Response(JSON.stringify(Array.from(new Set([...preset, ...Array.from(countries)])).sort()), { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
+        } catch {
+            return new Response(JSON.stringify(["US","JP","KR","SG","HK","TW"]), { headers: { 'Content-Type': 'application/json' } });
+        }
+    }
+
+    if (subPath.startsWith('testisp-lookup/') && method === 'GET') {
+        const targetIp = subPath.replace('testisp-lookup/', '');
+        try {
+            const resp = await fetch(`https://testisp.info/api/check?ip=${encodeURIComponent(targetIp)}`, {
+                headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }
+            });
+            const text = await resp.text();
+            return new Response(text, { status: resp.status, headers: { 'Content-Type': resp.headers.get('content-type') || 'application/json', 'Access-Control-Allow-Origin': '*' } });
+        } catch (err) {
+            return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+        }
+    }
+
+    return new Response("Not Found", { status: 404 });
+}
+
+// ==============================================
 // KUI 主体接口路由
 // ==============================================
 export async function onRequest(context) {
@@ -226,6 +660,11 @@ export async function onRequest(context) {
     const method = request.method;
     const action = params.path ? params.path[0] : ''; 
     const db = env.DB; 
+
+    // 防御：未绑定 D1 数据库时直接返回清晰错误，避免 Cloudflare 1101 (Worker threw exception)
+    if (!env || !env.DB) {
+        return new Response(JSON.stringify({ error: "D1 binding 'DB' is not configured in Cloudflare Pages. Please bind a D1 database (variable name DB) and redeploy." }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
 
     if (action === "probe") {
         await ensureDbSchema(db);
@@ -240,7 +679,9 @@ export async function onRequest(context) {
 
     // 🌟 Agent 统一探针与管理上报接口 (融入全新的 Reset Day 计算和动态云端测速节点)
     if (action === "report" && method === "POST") {
+     try {
         if (!(await verifyAuth(request.headers.get("Authorization"), db, env))) return new Response("Unauthorized", { status: 401 });
+        await ensureDbSchema(db);
         const data = await request.json(); 
         const nowMs = Date.now();
         const vpsIp = data.ip;
@@ -357,6 +798,9 @@ export async function onRequest(context) {
         } catch(e) {}
         
         return Response.json({ success: true, fast_mode: fastMode, interval: reportInterval, ping_ct: pingCt, ping_cu: pingCu, ping_cm: pingCm });
+     } catch (err) {
+        return Response.json({ error: "REPORT_ERR: " + (err && err.message ? err.message : String(err)) }, { status: 500 });
+     }
     }
 
     if (action === "config" && method === "GET") {
@@ -365,7 +809,28 @@ export async function onRequest(context) {
         const query = `SELECT n.* FROM nodes n LEFT JOIN users u ON n.username = u.username WHERE n.vps_ip = ? AND n.enable = 1 AND (n.traffic_limit = 0 OR n.traffic_used < n.traffic_limit) AND (n.expire_time = 0 OR n.expire_time > ?) AND (n.username = ? OR n.username = 'admin' OR (u.username IS NOT NULL AND u.enable = 1 AND (u.traffic_limit = 0 OR u.traffic_used < u.traffic_limit) AND (u.expire_time = 0 OR u.expire_time > ?)))`;
         const { results: machineNodes } = await db.prepare(query).bind(ip, now, adminUser, now).all();
         for (let node of machineNodes) { if (node.protocol === "dokodemo-door" && node.relay_type === "internal") { const targetNode = await db.prepare("SELECT * FROM nodes WHERE id = ?").bind(node.target_id).first(); if (targetNode) node.chain_target = { ip: targetNode.vps_ip, port: targetNode.port, protocol: targetNode.protocol, uuid: targetNode.uuid, sni: targetNode.sni, public_key: targetNode.public_key, short_id: targetNode.short_id }; } }
-        return Response.json({ success: true, configs: machineNodes });
+        let proxyCfg = { global: {}, toggle: { enable: false } };
+        try {
+            const r = await db.prepare("SELECT value FROM probe_settings WHERE key='proxy_config'").first();
+            if (r && r.value) { try { proxyCfg.global = JSON.parse(r.value); } catch (ex) {} }
+            const t = await db.prepare("SELECT value FROM probe_settings WHERE key='proxy_toggle_' || ?").bind(ip).first();
+            if (t && t.value) { try { proxyCfg.toggle = JSON.parse(t.value); } catch (ex) {} }
+        } catch (ex) {}
+        let socks5_outbound = { enabled: false };
+        try {
+            const s = await db.prepare("SELECT socks5_enable, socks5_addr, socks5_port, socks5_user, socks5_pass, socks5_mode, socks5_domains FROM servers WHERE ip = ?").bind(ip).first();
+            if (s && s.socks5_enable) socks5_outbound = { enabled: true, addr: s.socks5_addr, port: s.socks5_port, user: s.socks5_user, pass: s.socks5_pass, mode: s.socks5_mode || "global", domains: s.socks5_domains || "" };
+        } catch (ex) {}
+        return Response.json({ success: true, configs: machineNodes, proxy: proxyCfg, socks5_outbound: socks5_outbound });
+    }
+
+    // 🌟 住宅IP代理：优先外部控制器 (PROXY_CTRL_URL)；未配置时回落到本地 D1 实现
+    if (action === "proxy") {
+        const sub = params.path && params.path.length > 1 ? params.path.slice(1).join('/') : '';
+        if (sub === "mesh" || sub.startsWith("mesh/")) {
+            return new Response(JSON.stringify({ error: "mesh is not supported" }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+        }
+        return await proxyBridge(method, sub, request, env);
     }
 
     // 🌟 核心拦截并拆分普通订阅与 Clash 订阅生成
@@ -416,19 +881,21 @@ export async function onRequest(context) {
             const remark = encodeURIComponent(rawRemark); 
             let link = "";
             let cProxy = "";
+            const nodeIp = formatIpForLink(node.vps_ip);
+            const nodeSni = node.sni || '';
 
             // --- 传统 Base64 URL 生成 ---
             switch (node.protocol) {
-                case "VLESS": link = `vless://${node.uuid}@${node.vps_ip}:${node.port}?encryption=none&security=none&type=tcp#${remark}`; break;
-                case "XTLS-Reality": case "Reality": link = `vless://${node.uuid}@${node.vps_ip}:${node.port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${node.sni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=tcp&headerType=none#${remark}`; break;
-                case "Hysteria2": link = `hysteria2://${node.uuid}@${node.vps_ip}:${node.port}/?insecure=1&sni=${node.sni}&alpn=h3#${remark}`; break;
-                case "TUIC": link = `tuic://${node.uuid}:${node.private_key}@${node.vps_ip}:${node.port}?sni=${node.sni}&congestion_control=bbr&alpn=h3&allow_insecure=1#${remark}`; break;
-                case "Trojan": link = `trojan://${node.private_key}@${node.vps_ip}:${node.port}?security=tls&sni=${node.sni}&allowInsecure=1&type=tcp#${remark}`; break;
-                case "H2-Reality": link = `vless://${node.uuid}@${node.vps_ip}:${node.port}?encryption=none&security=reality&sni=${node.sni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=http#${remark}`; break;
-                case "gRPC-Reality": link = `vless://${node.uuid}@${node.vps_ip}:${node.port}?encryption=none&security=reality&sni=${node.sni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=grpc&serviceName=grpc#${remark}`; break;
-                case "AnyTLS": link = `anytls://${node.private_key}@${node.vps_ip}:${node.port}?security=tls&sni=${node.sni}&insecure=1#${remark}`; break;
-                case "Naive": link = `naive+https://${node.uuid}:${node.private_key}@${node.vps_ip}:${node.port}?security=tls&sni=${node.sni}#${remark}`; break;
-                case "Socks5": link = `socks5://${btoa(`${node.uuid}:${node.private_key}`)}@${node.vps_ip}:${node.port}#${remark}`; break;
+                case "VLESS": link = `vless://${node.uuid}@${nodeIp}:${node.port}?encryption=none&security=none&type=tcp#${remark}`; break;
+                case "XTLS-Reality": case "Reality": link = `vless://${node.uuid}@${nodeIp}:${node.port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${nodeSni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=tcp&headerType=none#${remark}`; break;
+                case "Hysteria2": link = `hysteria2://${encodeURIComponent(node.uuid || node.private_key)}@${nodeIp}:${node.port}/?insecure=1&sni=${encodeURIComponent(nodeSni)}&alpn=h3#${remark}`; break;
+                case "TUIC": link = `tuic://${node.uuid}:${node.private_key}@${nodeIp}:${node.port}?sni=${nodeSni}&congestion_control=bbr&alpn=h3&allow_insecure=1#${remark}`; break;
+                case "Trojan": link = `trojan://${node.private_key}@${nodeIp}:${node.port}?security=tls&sni=${nodeSni}&allowInsecure=1&type=tcp#${remark}`; break;
+                case "H2-Reality": link = `vless://${node.uuid}@${nodeIp}:${node.port}?encryption=none&security=reality&sni=${nodeSni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=http#${remark}`; break;
+                case "gRPC-Reality": link = `vless://${node.uuid}@${nodeIp}:${node.port}?encryption=none&security=reality&sni=${nodeSni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=grpc&serviceName=grpc#${remark}`; break;
+                case "AnyTLS": link = `anytls://${node.private_key}@${nodeIp}:${node.port}?security=tls&sni=${nodeSni}&insecure=1#${remark}`; break;
+                case "Naive": link = `naive+https://${node.uuid}:${node.private_key}@${nodeIp}:${node.port}?security=tls&sni=${nodeSni}#${remark}`; break;
+                case "Socks5": link = `socks5://${btoa(`${node.uuid}:${node.private_key}`)}@${nodeIp}:${node.port}#${remark}`; break;
                 case "VLESS-Argo": if (!node.sni.includes('等待')) link = `vless://${node.uuid}@${node.sni}:443?encryption=none&security=tls&type=ws&host=${node.sni}&path=%2F#${remark}-Argo`; break;
             }
             if (link) subLinks.push(link);
@@ -436,25 +903,25 @@ export async function onRequest(context) {
             // --- 动态拼装 Clash YAML 代理字典 (支持 Clash Meta / Mihomo) ---
             if (format === 'clash') {
                 if (node.protocol.includes("VLESS") || node.protocol.includes("Reality")) {
-                    const serverIpOrSni = (node.protocol === 'VLESS-Argo' && !node.sni.includes('等待')) ? node.sni : node.vps_ip;
+                    const serverIpOrSni = (node.protocol === 'VLESS-Argo' && !node.sni.includes('等待')) ? node.sni : nodeIp;
                     const serverPort = node.protocol === 'VLESS-Argo' ? 443 : node.port;
                     cProxy = `  - name: "${rawRemark}"\n    type: vless\n    server: ${serverIpOrSni}\n    port: ${serverPort}\n    uuid: ${node.uuid}\n    udp: true`;
                     
                     if (node.protocol === "XTLS-Reality" || node.protocol === "Reality") {
-                        cProxy += `\n    tls: true\n    flow: xtls-rprx-vision\n    servername: ${node.sni}\n    client-fingerprint: chrome\n    reality-opts:\n      public-key: ${node.public_key}\n      short-id: ${node.short_id || ""}`;
+                        cProxy += `\n    tls: true\n    flow: xtls-rprx-vision\n    servername: ${nodeSni}\n    client-fingerprint: chrome\n    reality-opts:\n      public-key: ${node.public_key}\n      short-id: ${node.short_id || ""}`;
                     } else if (node.protocol === "gRPC-Reality") {
-                        cProxy += `\n    tls: true\n    servername: ${node.sni}\n    client-fingerprint: chrome\n    network: grpc\n    grpc-opts:\n      grpc-service-name: grpc\n    reality-opts:\n      public-key: ${node.public_key}\n      short-id: ${node.short_id || ""}`;
+                        cProxy += `\n    tls: true\n    servername: ${nodeSni}\n    client-fingerprint: chrome\n    network: grpc\n    grpc-opts:\n      grpc-service-name: grpc\n    reality-opts:\n      public-key: ${node.public_key}\n      short-id: ${node.short_id || ""}`;
                     } else if (node.protocol === "H2-Reality") {
-                        cProxy += `\n    tls: true\n    servername: ${node.sni}\n    client-fingerprint: chrome\n    network: h2\n    reality-opts:\n      public-key: ${node.public_key}\n      short-id: ${node.short_id || ""}`;
+                        cProxy += `\n    tls: true\n    servername: ${nodeSni}\n    client-fingerprint: chrome\n    network: h2\n    h2-opts:\n      path: "/"\n      host: ${nodeSni || nodeIp}`;
                     } else if (node.protocol === 'VLESS-Argo' && !node.sni.includes('等待')) {
-                        cProxy += `\n    tls: true\n    servername: ${node.sni}\n    network: ws\n    ws-opts:\n      path: "/"\n      headers:\n        Host: ${node.sni}`;
+                        cProxy += `\n    tls: true\n    servername: ${nodeSni}\n    network: ws\n    ws-opts:\n      path: "/"\n      headers:\n        Host: ${nodeSni}`;
                     }
                 } else if (node.protocol === "Trojan") {
-                    cProxy = `  - name: "${rawRemark}"\n    type: trojan\n    server: ${node.vps_ip}\n    port: ${node.port}\n    password: ${node.private_key}\n    udp: true\n    sni: ${node.sni}\n    skip-cert-verify: true`;
+                    cProxy = `  - name: "${rawRemark}"\n    type: trojan\n    server: ${nodeIp}\n    port: ${node.port}\n    password: ${node.private_key}\n    udp: true\n    sni: ${nodeSni}\n    skip-cert-verify: true`;
                 } else if (node.protocol === "Hysteria2") {
-                    cProxy = `  - name: "${rawRemark}"\n    type: hysteria2\n    server: ${node.vps_ip}\n    port: ${node.port}\n    password: ${node.uuid}\n    sni: ${node.sni}\n    skip-cert-verify: true`;
+                    cProxy = `  - name: "${rawRemark}"\n    type: hysteria2\n    server: ${nodeIp}\n    port: ${node.port}\n    password: ${node.uuid || node.private_key}\n    sni: ${nodeSni}\n    skip-cert-verify: true`;
                 } else if (node.protocol === "TUIC") {
-                    cProxy = `  - name: "${rawRemark}"\n    type: tuic\n    server: ${node.vps_ip}\n    port: ${node.port}\n    uuid: ${node.uuid}\n    password: ${node.private_key}\n    sni: ${node.sni}\n    skip-cert-verify: true`;
+                    cProxy = `  - name: "${rawRemark}"\n    type: tuic\n    server: ${nodeIp}\n    port: ${node.port}\n    uuid: ${node.uuid}\n    password: ${node.private_key}\n    sni: ${nodeSni}\n    skip-cert-verify: true`;
                 }
                 
                 if (cProxy) {
@@ -464,15 +931,119 @@ export async function onRequest(context) {
             }
         }
 
+        // --- 第三方订阅节点整合进订阅 ---
+        try {
+            const { results: thNodes } = await db.prepare("SELECT * FROM third_party_nodes WHERE enable = 1").all();
+            for (const node of thNodes) {
+                try {
+                const remark = encodeURIComponent(node.name || `TP_${node.protocol}_${node.port}`);
+                let link = "";
+                const thirdIp = formatIpForLink(node.address);
+                const thirdSni = node.sni || '';
+                switch (node.protocol) {
+                    case "VMess": link = (node.extra && node.extra.startsWith('vmess://')) ? node.extra : ''; break;
+                    case "VLESS": {
+                        if (node.flow && (node.public_key || node.flow.includes('rprx'))) {
+                            link = `vless://${node.uuid}@${thirdIp}:${node.port}?encryption=none&flow=${node.flow}&security=reality&sni=${thirdSni}&fp=chrome&pbk=${node.public_key||''}&sid=${node.short_id||''}&type=${node.network||'tcp'}${node.path ? '&path=' + encodeURIComponent(node.path) : ''}#${remark}`;
+                        } else {
+                            link = `vless://${node.uuid}@${thirdIp}:${node.port}?encryption=none&security=none&type=${node.network||'tcp'}${node.path ? '&path=' + encodeURIComponent(node.path) : ''}${node.host ? '&host=' + encodeURIComponent(node.host) : ''}#${remark}`;
+                        }
+                        break;
+                    }
+                    case "XTLS-Reality": case "Reality": link = `vless://${node.uuid}@${thirdIp}:${node.port}?encryption=none&flow=${node.flow||'xtls-rprx-vision'}&security=reality&sni=${thirdSni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id||""}&type=${node.network||'tcp'}${node.path?'&path='+encodeURIComponent(node.path):''}${node.host?'&host='+encodeURIComponent(node.host):''}#${remark}`; break;
+                    case "Hysteria2": link = `hysteria2://${encodeURIComponent(node.uuid || node.password)}@${thirdIp}:${node.port}/?insecure=1&sni=${encodeURIComponent(thirdSni)}&alpn=h3#${remark}`; break;
+                    case "TUIC": link = `tuic://${node.uuid}:${node.password}@${thirdIp}:${node.port}?sni=${thirdSni}&congestion_control=bbr&alpn=h3&allow_insecure=1#${remark}`; break;
+                    case "Trojan": link = `trojan://${node.password}@${thirdIp}:${node.port}?security=tls&sni=${thirdSni}&allowInsecure=1&type=tcp#${remark}`; break;
+                    case "H2-Reality": link = `vless://${node.uuid}@${thirdIp}:${node.port}?encryption=none&security=reality&sni=${thirdSni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=http#${remark}`; break;
+                    case "gRPC-Reality": link = `vless://${node.uuid}@${thirdIp}:${node.port}?encryption=none&security=reality&sni=${thirdSni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=grpc&serviceName=grpc#${remark}`; break;
+                    case "AnyTLS": link = `anytls://${node.password}@${thirdIp}:${node.port}?security=tls&sni=${thirdSni}&insecure=1#${remark}`; break;
+                    case "Naive": link = `naive+https://${node.uuid}:${node.password}@${thirdIp}:${node.port}?security=tls&sni=${thirdSni}#${remark}`; break;
+                    case "Socks5": link = `socks5://${btoa(`${node.uuid}:${node.password}`)}@${thirdIp}:${node.port}#${remark}`; break;
+                }
+                if (link) subLinks.push(link);
+
+                if (format === 'clash') {
+                    let cProxy = "";
+                    if (node.protocol === "VMess") {
+                        cProxy = `  - name: "${node.name || 'TP'}"\n    type: vmess\n    server: ${thirdIp}\n    port: ${node.port}\n    uuid: ${node.uuid}\n    alterId: 0\n    cipher: auto\n    udp: true${node.network && node.network !== 'tcp' ? `\n    network: ${node.network}${node.host ? `\n    ws-headers:\n      Host: ${node.host}` : ''}${node.path ? `\n    ws-path: ${node.path}` : ''}` : ''}`;
+                    } else if (node.protocol.includes("VLESS") || node.protocol.includes("Reality")) {
+                        const isReality = (node.flow && node.flow.includes('rprx')) || node.protocol === "XTLS-Reality" || node.protocol === "Reality";
+                        cProxy = `  - name: "${node.name || 'TP'}"\n    type: vless\n    server: ${thirdIp}\n    port: ${node.port}\n    uuid: ${node.uuid}\n    udp: true`;
+                        if (isReality) {
+                            cProxy += `\n    tls: true\n    servername: ${thirdSni}\n    client-fingerprint: chrome\n    reality-opts:\n      public-key: ${node.public_key || ''}\n      short-id: ${node.short_id || ""}`;
+                            if (((node.protocol === "Reality" || node.protocol === "XTLS-Reality") && node.flow && node.flow.includes('rprx')) || node.protocol === "VLSS") {
+                                cProxy += `\n    flow: ${node.flow || 'xtls-rprx-vision'}`;
+                            }
+                            const net = node.network || 'tcp';
+                            if (net === 'grpc') {
+                                cProxy += `\n    network: grpc\n    grpc-opts:\n      grpc-service-name: ${node.extra?.serviceName || 'grpc'}`;
+                            } else if (net === 'http') {
+                                const path = node.path || '/';
+                                const hostHeader = node.host || thirdSni || thirdIp;
+                                cProxy += `\n    network: h2\n    h2-opts:\n      host: ${hostHeader}\n      path: "${path}"`;
+                            } else if (net === 'ws') {
+                                const path = node.path || '/';
+                                const hostHeader = node.host || thirdSni || thirdIp;
+                                cProxy += `\n    network: ws\n    ws-opts:\n      path: "${path}"\n      headers:\n        Host: ${hostHeader}`;
+                            }
+                        } else if (node.protocol === "gRPC-Reality") {
+                            cProxy += `\n    tls: true\n    servername: ${thirdSni}\n    client-fingerprint: chrome\n    network: grpc\n    grpc-opts:\n      grpc-service-name: grpc\n    reality-opts:\n      public-key: ${node.public_key}\n      short-id: ${node.short_id || ""}`;
+                        } else if (node.protocol === "H2-Reality") {
+                            cProxy += `\n    tls: true\n    servername: ${thirdSni}\n    client-fingerprint: chrome\n    network: h2\n    h2-opts:\n      host: ${thirdSni || thirdIp}\n      path: "/"`;
+                        }
+                    } else if (node.protocol === "Trojan") {
+                        cProxy = `  - name: "${node.name || 'TP'}"\n    type: trojan\n    server: ${thirdIp}\n    port: ${node.port}\n    password: ${node.password}\n    udp: true\n    sni: ${thirdSni}\n    skip-cert-verify: true`;
+                    } else if (node.protocol === "Hysteria2") {
+                        cProxy = `  - name: "${node.name || 'TP'}"\n    type: hysteria2\n    server: ${thirdIp}\n    port: ${node.port}\n    password: ${node.uuid || node.password}\n    sni: ${thirdSni}\n    skip-cert-verify: true`;
+                    } else if (node.protocol === "TUIC") {
+                        cProxy = `  - name: "${node.name || 'TP'}"\n    type: tuic\n    server: ${thirdIp}\n    port: ${node.port}\n    uuid: ${node.uuid}\n    password: ${node.password}\n    sni: ${thirdSni}\n    skip-cert-verify: true`;
+                    }
+                    if (cProxy) {
+                        clashProxies.push(cProxy);
+                        proxyNames.push(`"${node.name || 'TP'}"`);
+                    }
+                }
+                } catch(e) {}
+            }
+        } catch (e) {}
+
+        // --- 住宅IP代理 SOCKS5 节点整合进订阅 ---
+        try {
+            const proxyUser = env.PROXY_USER || 'proxy';
+            const proxyPass = env.PROXY_PASS || '888888';
+            const cutoff = Date.now() - 120000;
+            const { results: proxyServers } = await db.prepare('SELECT ip, details FROM proxy_ctrl_servers WHERE last_seen > ?').bind(cutoff).all();
+            if (proxyServers) {
+                for (const s of proxyServers) {
+                    let details = [];
+                    try { details = JSON.parse(s.details || '[]'); } catch(e) { continue; }
+                    for (const node of details) {
+                        if (!node.active) continue;
+                        const remark = `${node.country || 'XX'}_Resi_${node.node_ip || s.ip}`;
+                        const encRemark = encodeURIComponent(remark);
+                        const proxyIp = formatIpForLink(s.ip);
+                        const link = `socks5://${proxyUser}:${proxyPass}@${proxyIp}:${node.port || 7920}#${encRemark}`;
+                        subLinks.push(link);
+                        if (format === 'clash') {
+                            const cProxy = `  - name: "${remark}"\n    type: socks5\n    server: ${proxyIp}\n    port: ${node.port || 7920}\n    username: ${proxyUser}\n    password: ${proxyPass}\n    udp: true`;
+                            clashProxies.push(cProxy);
+                            proxyNames.push(`"${remark}"`);
+                        }
+                    }
+                }
+            }
+        } catch (e) {}
+
         // --- 若为 Clash 格式，渲染 YAML 返回 ---
         if (format === 'clash') {
             const proxyGroupList = proxyNames.length > 0 ? proxyNames.map(n => `      - ${n}`).join('\n') : '      - DIRECT';
+            const hasIPv6 = results.some(n => /:/.test(n.vps_ip)) || clashProxies.some(p => /server: \[.*\]/.test(p));
             const clashYaml = `port: 7890
 socks-port: 7891
 allow-lan: true
 mode: rule
 log-level: info
-ipv6: false
+ipv6: ${hasIPv6 ? 'true' : 'false'}
 external-controller: 127.0.0.1:9090
 
 proxies:
@@ -540,7 +1111,8 @@ rules:
         }
         
         if (action === "vps" && isAdmin) {
-            if (method === "POST") { const { ip, name } = await request.json(); await db.prepare("INSERT OR IGNORE INTO servers (ip, name, alert_sent) VALUES (?, ?, 0)").bind(ip, name).run(); return Response.json({ success: true }); }
+            if (method === "POST") { const { ip, name, socks5_enable, socks5_addr, socks5_port, socks5_user, socks5_pass } = await request.json(); await db.prepare("INSERT OR IGNORE INTO servers (ip, name, alert_sent, socks5_enable, socks5_addr, socks5_port, socks5_user, socks5_pass) VALUES (?, ?, 0, ?, ?, ?, ?, ?)").bind(ip, name, socks5_enable||0, socks5_addr||'', socks5_port||0, socks5_user||'', socks5_pass||'').run(); return Response.json({ success: true }); }
+            if (method === "PUT") { const data = await request.json(); const ip = data.ip; if (!ip) return Response.json({ error: "IP required" }, { status: 400 }); const updates = []; const params = []; if (data.socks5_enable !== undefined) { updates.push("socks5_enable = ?"); params.push(data.socks5_enable ? 1 : 0); } if (data.socks5_addr !== undefined) { updates.push("socks5_addr = ?"); params.push(data.socks5_addr); } if (data.socks5_port !== undefined) { updates.push("socks5_port = ?"); params.push(parseInt(data.socks5_port) || 0); } if (data.socks5_user !== undefined) { updates.push("socks5_user = ?"); params.push(data.socks5_user); } if (data.socks5_pass !== undefined) { updates.push("socks5_pass = ?"); params.push(data.socks5_pass); } if (data.socks5_mode !== undefined) { updates.push("socks5_mode = ?"); params.push(data.socks5_mode); } if (data.socks5_domains !== undefined) { updates.push("socks5_domains = ?"); params.push(data.socks5_domains); } if (updates.length > 0) { params.push(ip); await db.prepare(`UPDATE servers SET ${updates.join(', ')} WHERE ip = ?`).bind(...params).run(); } return Response.json({ success: true }); }
             if (method === "DELETE") { 
                 const ip = new URL(request.url).searchParams.get("ip"); 
                 await db.batch([ db.prepare("DELETE FROM nodes WHERE vps_ip = ?").bind(ip), db.prepare("DELETE FROM traffic_stats WHERE ip = ?").bind(ip), db.prepare("DELETE FROM servers WHERE ip = ?").bind(ip), db.prepare("DELETE FROM probe_servers WHERE id = ?").bind(ip) ]); 
@@ -554,8 +1126,55 @@ rules:
             if (method === "DELETE") { await db.prepare("DELETE FROM nodes WHERE id = ?").bind(new URL(request.url).searchParams.get("id")).run(); return Response.json({ success: true }); }
         }
 
+        if (action === "thirdparty" && isAdmin) {
+            await ensureDbSchema(db);
+            if (method === "POST") {
+                const { name, url } = await request.json();
+                if (!url) return Response.json({ error: "请填写订阅链接" }, { status: 400 });
+                const id = crypto.randomUUID();
+                const now = Date.now();
+                await db.prepare("INSERT INTO third_party_subscriptions (id, name, url, added_at, last_fetched_at) VALUES (?, ?, ?, ?, ?)" ).bind(id, name || '第三方订阅', url, now, now).run();
+                let parsedCount = 0; let parseDebug = {};
+                try {
+                    const res = await fetch(url, { headers: { 'User-Agent': 'v2rayN/6.44', 'Accept': '*/*' } });
+                    const text = await res.text();
+                    const result = await parseThirdPartySubscription(text);
+                    const { nodes, protocolCounts, debug } = result;
+                    parseDebug = { protocolCounts, debug };
+                    if (nodes.length > 0) {
+                        const stmts = nodes.map(n => db.prepare("INSERT INTO third_party_nodes (id, subscription_id, name, protocol, address, port, uuid, password, sni, public_key, short_id, flow, network, host, path, extra, enable, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(n.id, id, n.name, n.protocol, n.address, n.port, n.uuid || '', n.password || '', n.sni || '', n.public_key || '', n.short_id || '', n.flow || '', n.network || '', n.host || '', n.path || '', n.extra || '', 1, now));
+                        await db.batch(stmts);
+                        parsedCount = nodes.length;
+                    }
+                } catch (e) { console.error("解析第三方订阅失败:", e); parseDebug.fetchError = (e && e.message) || String(e); }
+                await db.prepare("UPDATE third_party_subscriptions SET last_fetched_at = ? WHERE id = ?").bind(Date.now(), id).run();
+                return Response.json({ success: true, id, parsedCount, debug: parseDebug });
+            }
+            if (method === "GET") {
+                const { results } = await db.prepare("SELECT s.*, COUNT(n.id) as node_count FROM third_party_subscriptions s LEFT JOIN third_party_nodes n ON s.id = n.subscription_id GROUP BY s.id ORDER BY s.added_at DESC").all();
+                return Response.json(results || []);
+            }
+            if (method === "PUT") {
+                const { id, enable } = await request.json();
+                if (id) await db.prepare("UPDATE third_party_subscriptions SET is_enable = ? WHERE id = ?").bind(enable ? 1 : 0, id).run();
+                if (id) await db.prepare("UPDATE third_party_nodes SET enable = ? WHERE subscription_id = ?").bind(enable ? 1 : 0, id).run();
+                return Response.json({ success: true });
+            }
+            if (method === "DELETE") {
+                const subId = new URL(request.url).searchParams.get("id");
+                if (!subId) return Response.json({ error: "缺少订阅ID" }, { status: 400 });
+                await db.prepare("DELETE FROM third_party_subscriptions WHERE id = ?").bind(subId).run();
+                await db.prepare("DELETE FROM third_party_nodes WHERE subscription_id = ?").bind(subId).run();
+                return Response.json({ success: true });
+            }
+        }
+
         return new Response("Not Found", { status: 404 });
-    } catch (err) { return Response.json({ error: err.message }, { status: 500 }); }
+    } catch (err) {
+        const msg = (err && err.message) ? err.message : String(err);
+        // 兜底捕获，杜绝未处理异常导致的 Cloudflare 1101
+        return new Response(JSON.stringify({ error: "SERVER_ERR: " + msg }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
 }
 
 export async function onRequestScheduled(context) {

@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>KUI x Server Monitor</title>
     
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
@@ -13,6 +16,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
     <style>
         [v-cloak] { display: none !important; }
@@ -130,6 +134,16 @@
         .theme5 .probe-custom-table th { background: #111; color: #f0f; border-color: #333; } .theme5 .probe-custom-table td { border-color: #333; } .theme5 .probe-custom-table tr:hover { background: #222; }
         .theme5 .probe-stat-subtext { color: rgba(255,255,255,0.6); }
         .theme5 #probe-map-container { background-color: #0d1117; border-color: #30363d; background-image: linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px); }
+
+        /* ================= Proxy Controller 双活引擎总控 ================= */
+        .pc-body { font-family: 'Inter', sans-serif; }
+        .pc-font-mono { font-family: 'JetBrains Mono', monospace; }
+        .pc-body::-webkit-scrollbar { width: 8px; height: 8px; }
+        .pc-body::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+        .pc-body::-webkit-scrollbar-thumb { background: rgba(51, 65, 85, 0.8); border-radius: 4px; }
+        .pc-body::-webkit-scrollbar-thumb:hover { background: rgba(71, 85, 105, 1); }
+        .pc-body input[type=number]::-webkit-inner-spin-button,
+        .pc-body input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
     </style>
 </head>
 <body id="main-body" class="theme1">
@@ -346,11 +360,14 @@
                     <template v-if="role === 'admin'">
                         <button @click="activeTab = 'nodes'" :class="activeTab === 'nodes' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">服务器与节点</button>
                         <button @click="activeTab = 'users'" :class="activeTab === 'users' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">多用户管理</button>
+                        <button @click="activeTab = 'proxy'" :class="activeTab === 'proxy' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">🌐 住宅IP代理</button>
+                        <button @click="activeTab = 'thirdparty'" :class="activeTab === 'thirdparty' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">🔗 第三方订阅</button>
                         <button @click="activeTab = 'settings'" :class="activeTab === 'settings' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">⚙️ 系统设置</button>
                         <button @click="activeTab = 'probe'; probeDetailId = null;" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base text-emerald-600 hover:bg-emerald-50 shadow-sm border border-transparent hover:border-emerald-200">🌐 探针全景大盘</button>
                     </template>
                     <template v-if="role === 'user'">
                         <button @click="activeTab = 'dashboard'" :class="activeTab === 'dashboard' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">我的主页</button>
+                        <button @click="activeTab = 'proxy'" :class="activeTab === 'proxy' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">🌐 住宅IP代理</button>
                         <button @click="activeTab = 'settings'" :class="activeTab === 'settings' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">⚙️ 系统设置</button>
                         <button @click="activeTab = 'probe'; probeDetailId = null;" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base text-blue-600 hover:bg-blue-50 shadow-sm border border-transparent hover:border-blue-200">🌐 探针全景大盘</button>
                     </template>
@@ -408,7 +425,7 @@
                                 <div class="text-xs font-bold text-slate-400 mb-2 pl-1">手动单节点精细化下发</div>
                                 <select v-model="newNodeParams[vps.ip].username" class="w-full border-none bg-indigo-50/50 text-indigo-700 font-bold text-sm p-3 rounded-xl outline-none mb-3"><option value="admin">👤 归属权: 管理员自身</option><option v-for="u in users" :value="u.username">👤 归属权: {{ u.username }}</option></select>
                                 <div class="flex gap-3 mb-3">
-                                    <select v-model="newNodeParams[vps.ip].protocol" class="border-none bg-slate-100/50 text-slate-700 text-sm p-3 rounded-xl flex-1 outline-none font-medium"><option value="XTLS-Reality">XTLS + Reality</option><option value="Hysteria2">Hysteria2 (极速)</option><option value="TUIC">TUIC v5 (高并发)</option><option value="Trojan">Trojan</option><option value="H2-Reality">H2 + Reality</option><option value="gRPC-Reality">gRPC + Reality</option><option value="AnyTLS">AnyTLS</option><option value="Naive">Naive</option><option disabled>──────────</option><option value="VLESS-Argo">VLESS Argo (全自动穿透)</option><option value="dokodemo-door">Dokodemo (内部转发)</option></select>
+                                    <select v-model="newNodeParams[vps.ip].protocol" class="border-none bg-slate-100/50 text-slate-700 text-sm p-3 rounded-xl flex-1 outline-none font-medium"><option value="XTLS-Reality">XTLS + Reality</option><option value="Hysteria2">Hysteria2 (极速)</option><option value="TUIC">TUIC v5 (高并发)</option><option value="Trojan">Trojan</option><option value="H2-Reality">H2 + Reality</option><option value="gRPC-Reality">gRPC + Reality</option><option value="AnyTLS">AnyTLS</option><option value="Naive">Naive</option><option disabled>──────────</option><option value="VLESS-Argo">VLESS Argo (IP被封)</option><option value="dokodemo-door">Dokodemo (内部转发)</option></select>
                                     <input v-model="newNodeParams[vps.ip].port" type="number" placeholder="端口" class="bg-slate-100/50 text-slate-700 text-sm p-3 rounded-xl w-24 outline-none font-mono">
                                 </div>
                                 <div class="grid grid-cols-2 gap-3 mb-3">
@@ -418,6 +435,36 @@
                                 <div v-if="['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(newNodeParams[vps.ip].protocol)" class="bg-slate-100/50 p-3 rounded-xl mb-3"><input v-model="newNodeParams[vps.ip].sni" :list="'sni-rec-' + vps.ip" placeholder="伪装域名: 支持手填或下拉" class="w-full bg-transparent outline-none text-sm font-medium text-slate-700"><datalist :id="'sni-rec-' + vps.ip"><option value="addons.mozilla.org"></option><option value="www.apple.com"></option><option value="gateway.icloud.com"></option><option value="itunes.apple.com"></option><option value="www.microsoft.com"></option></datalist></div>
                                 <div v-if="['TUIC', 'Hysteria2', 'Trojan', 'AnyTLS', 'Naive'].includes(newNodeParams[vps.ip].protocol)" class="bg-slate-100/50 p-3 rounded-xl mb-3"><input v-model="newNodeParams[vps.ip].sni" placeholder="SNI 域名 / 主机名" class="w-full bg-transparent outline-none text-sm font-medium text-slate-700"></div>
                                 <button @click="addNode(vps.ip)" class="w-full bg-gradient-to-r from-slate-800 to-black text-white py-3 rounded-xl font-bold shadow-lg transition-all hover:scale-[1.02]">添加单节点</button>
+                            </div>
+
+                            <div class="bg-slate-100/50 p-4 rounded-[1.5rem] border border-slate-200 mt-4">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div class="flex items-center gap-2">
+                                        <span :class="vps.socks5_enable == 1 ? 'bg-emerald-500' : 'bg-slate-300'" class="w-2 h-2 rounded-full inline-block"></span>
+                                        <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">SOCKS5 出站代理</span>
+                                    </div>
+                                    <label class="flex items-center gap-1 text-sm"><input type="checkbox" :checked="vps.socks5_enable == 1" @change="updateVpsSocks5(vps.ip, 'socks5_enable', $event.target.checked ? 1 : 0); vps.socks5_enable = $event.target.checked ? 1 : 0" class="w-4 h-4 accent-indigo-600"> 启用</label>
+                                </div>
+                                <div v-if="vps.socks5_enable == 1" class="space-y-3">
+                                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                        <div><label class="block text-[10px] font-bold text-slate-400 mb-1">地址</label><input :value="vps.socks5_addr" @change="updateVpsSocks5(vps.ip, 'socks5_addr', $event.target.value)" placeholder="SOCKS5 地址" class="w-full bg-white border p-2.5 rounded-xl text-sm outline-none"></div>
+                                        <div><label class="block text-[10px] font-bold text-slate-400 mb-1">端口</label><input :value="vps.socks5_port" @change="updateVpsSocks5(vps.ip, 'socks5_port', parseInt($event.target.value)||0)" type="number" placeholder="1080" class="w-full bg-white border p-2.5 rounded-xl text-sm outline-none"></div>
+                                        <div><label class="block text-[10px] font-bold text-slate-400 mb-1">用户名</label><input :value="vps.socks5_user" @change="updateVpsSocks5(vps.ip, 'socks5_user', $event.target.value)" placeholder="可选" class="w-full bg-white border p-2.5 rounded-xl text-sm outline-none"></div>
+                                        <div><label class="block text-[10px] font-bold text-slate-400 mb-1">密码</label><input :value="vps.socks5_pass" @change="updateVpsSocks5(vps.ip, 'socks5_pass', $event.target.value)" type="password" placeholder="可选" class="w-full bg-white border p-2.5 rounded-xl text-sm outline-none"></div>
+                                    </div>
+                                    <div class="flex items-center gap-3 pt-1">
+                                        <label class="flex items-center gap-2 text-xs font-bold text-slate-500"><input type="radio" :value="'global'" :checked="(vps.socks5_mode||'global')=='global'" @change="updateVpsSocks5(vps.ip, 'socks5_mode', 'global'); vps.socks5_mode='global'" class="accent-indigo-600"> 全局出站</label>
+                                        <label class="flex items-center gap-2 text-xs font-bold text-slate-500"><input type="radio" :value="'selective'" :checked="(vps.socks5_mode||'global')=='selective'" @change="updateVpsSocks5(vps.ip, 'socks5_mode', 'selective'); vps.socks5_mode='selective'" class="accent-indigo-600"> 局部代理</label>
+                                    </div>
+                                    <div v-if="(vps.socks5_mode||'global')=='selective'" class="bg-white/60 border border-slate-200 p-3 rounded-xl">
+                                        <div class="text-xs font-bold text-slate-500 mb-2">选择需走 SOCKS5 代理的分类：</div>
+                                        <div class="flex flex-wrap gap-3">
+                                            <label v-for="cat in socks5Categories" :key="cat.key" class="flex items-center gap-1.5 text-xs font-medium text-slate-600 cursor-pointer">
+                                                <input type="checkbox" :checked="socks5CatSelected(vps, cat.key)" @change="toggleSocks5Cat(vps, cat.key, $event.target.checked)" class="w-3.5 h-3.5 accent-indigo-600"> {{ cat.label }}
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -475,6 +522,163 @@
                 </div>
             </div>
 
+            <!-- 住宅IP代理控制器 (双活引擎总控 - 已内联) -->
+            <div v-if="isLoggedIn && activeTab === 'proxy'" class="pc-body min-h-screen bg-[#090E17] text-slate-300 relative overflow-x-hidden selection:bg-indigo-500/30">
+                <div class="fixed top-[-20%] left-[-10%] w-[50%] h-[50%] bg-indigo-600/20 blur-[120px] rounded-full pointer-events-none z-0"></div>
+                <div class="fixed bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-blue-600/10 blur-[120px] rounded-full pointer-events-none z-0"></div>
+
+                <div class="max-w-7xl mx-auto p-6 relative z-10">
+                    <div class="flex flex-col md:flex-row justify-between items-start md:items-end mb-10 gap-6">
+                        <div>
+                            <h1 class="text-4xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400 tracking-tight drop-shadow-sm">Proxy Controller</h1>
+                            <p class="text-slate-400 mt-2 text-sm flex items-center gap-2">
+                                <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                                直链提取 API: <a href="/api/proxy/proxies" target="_blank" class="text-indigo-400 hover:text-indigo-300 border-b border-indigo-400/30 hover:border-indigo-300 transition-colors">/api/proxies</a>
+                            </p>
+                        </div>
+
+                        <div class="flex flex-col gap-3 w-full md:w-auto">
+                            <div class="bg-slate-900/80 backdrop-blur-md border border-slate-700/50 rounded-xl overflow-hidden shadow-lg">
+                                <div class="bg-slate-800/50 px-4 py-2 border-b border-slate-700/50 flex items-center gap-2">
+                                    <div class="flex gap-1.5">
+                                        <div class="w-3 h-3 rounded-full bg-rose-500/80"></div>
+                                        <div class="w-3 h-3 rounded-full bg-amber-500/80"></div>
+                                        <div class="w-3 h-3 rounded-full bg-emerald-500/80"></div>
+                                    </div>
+                                    <span class="text-xs text-slate-400 font-mono ml-2">VPS 纳管命令 (Root)</span>
+                                </div>
+                                <div id="agent-cmd" class="p-3 bg-[#0D1117] text-sm pc-font-mono text-emerald-400 select-all overflow-x-auto whitespace-nowrap">bash &lt;(curl -sL /vps/residential-proxy.sh) --domain ORIGIN --controller ORIGIN</div>
+                            </div>
+
+                            <div class="flex gap-4 text-xs font-mono">
+                                <div class="bg-slate-900/50 border border-slate-800 rounded-lg px-3 py-2 flex-1 flex justify-between items-center shadow-sm">
+                                    <span class="text-slate-500">面板凭证</span>
+                                    <span class="text-indigo-300 font-bold ml-4">admin <span class="text-slate-600">/</span> admin888</span>
+                                </div>
+                                <div class="bg-slate-900/50 border border-slate-800 rounded-lg px-3 py-2 flex-1 flex justify-between items-center shadow-sm">
+                                    <span class="text-slate-500">代理凭证</span>
+                                    <span class="text-amber-300 font-bold ml-4">proxy <span class="text-slate-600">/</span> 888888</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
+                        <div class="lg:col-span-1 bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-2xl p-6 shadow-xl shadow-black/20">
+                            <div class="flex items-center gap-2 mb-4">
+                                <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                <h2 class="text-lg font-bold text-slate-200">全量国家代码库</h2>
+                            </div>
+                            <p class="text-xs text-slate-500 mb-4 leading-relaxed">系统已合并预设代码及实时的网络探测代码，提供最全面的目标锁定选择。</p>
+                            <div id="countries-list" class="flex flex-wrap gap-2 max-h-[160px] overflow-y-auto pr-1">
+                                <span class="text-slate-600 text-sm animate-pulse">正在同步数据库...</span>
+                            </div>
+                        </div>
+
+                        <div class="lg:col-span-3 bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-2xl p-6 shadow-xl shadow-black/20 flex flex-col justify-center relative overflow-hidden">
+                            <div class="absolute top-0 right-0 p-6 opacity-5 pointer-events-none">
+                                <svg class="w-32 h-32" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                            </div>
+
+                            <div class="mb-6 relative z-10">
+                                <h2 class="text-2xl font-bold text-slate-100 tracking-wide mb-1 flex items-center gap-2">主备双活调度引擎 <span class="bg-indigo-500/20 text-indigo-400 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border border-indigo-500/30">Active-Standby</span></h2>
+                                <p class="text-sm text-slate-400">单路端口锁定，内置主备双路隧道 (tun_main / tun_backup)，通道死活将由软开关瞬间接管。</p>
+                            </div>
+
+                            <div class="flex flex-wrap items-center bg-slate-950/50 border border-slate-800/80 rounded-xl p-5 relative z-10 gap-y-4">
+                                <div class="flex items-center gap-3 mr-3 border-r border-slate-700/50 pr-4">
+                                    <span class="text-slate-400 text-sm font-medium whitespace-nowrap">目标地区:</span>
+                                    <input type="text" id="slot-cfg-0" value="JP" maxlength="2" class="bg-slate-900 border border-slate-700 rounded-lg py-2 w-16 text-white font-bold text-lg uppercase text-center focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none transition-all shadow-inner" placeholder="US" />
+                                </div>
+
+                                <div class="flex items-center gap-3 mr-4">
+                                    <span class="text-slate-400 text-sm font-medium whitespace-nowrap">服务端口:</span>
+                                    <input type="number" id="slot-port" value="7920" min="1024" max="65535" class="bg-slate-900 border border-slate-700 rounded-lg py-2 w-24 text-white font-bold text-lg text-center focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none transition-all shadow-inner" placeholder="7920" />
+                                </div>
+
+                                <button onclick="pcSaveConfig()" class="group relative px-6 py-2.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-bold shadow-lg shadow-blue-900/20 hover:shadow-indigo-900/40 hover:-translate-y-0.5 transition-all duration-200 overflow-hidden ml-auto">
+                                    <div class="absolute inset-0 bg-white/20 group-hover:translate-x-full -translate-x-full transform transition-transform duration-300 ease-in-out skew-x-12"></div>
+                                    <span class="flex items-center gap-2">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
+                                        下发策略
+                                    </span>
+                                </button>
+
+                                <div class="h-8 w-px bg-slate-800 mx-2 hidden sm:block"></div>
+
+                                <button onclick="pcSwitchIP()" class="group relative px-6 py-2.5 rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 text-white text-sm font-bold shadow-lg shadow-purple-900/20 hover:shadow-pink-900/40 hover:-translate-y-0.5 transition-all duration-200 overflow-hidden">
+                                    <div class="absolute inset-0 bg-white/20 group-hover:translate-x-full -translate-x-full transform transition-transform duration-300 ease-in-out skew-x-12"></div>
+                                    <span class="flex items-center gap-2">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                                        强制更换 IP
+                                    </span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-xl overflow-hidden shadow-black/20 mb-8">
+                        <div class="px-6 py-4 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
+                            <h3 class="font-semibold text-slate-200 flex items-center gap-2">
+                                <div class="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse"></div>
+                                活跃节点矩阵
+                            </h3>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="bg-slate-900/80 text-slate-400 text-xs uppercase tracking-wider">
+                                        <th class="py-4 px-6 font-medium w-1/5">母机宿主 IP</th>
+                                        <th class="py-4 px-6 font-medium">主备双路出口状态 (Active / Standby)</th>
+                                        <th class="py-4 px-6 font-medium w-32">心跳延迟</th>
+                                        <th class="py-4 px-6 font-medium text-right w-24">负载率</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pc-nodes-table" class="divide-y divide-slate-800/50 text-sm">
+                                    <tr><td colspan="4" class="py-12 text-center text-slate-500">正在与 D1 数据库建立量子纠缠...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="pc-ip-score-section" style="display: none;" class="bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-xl overflow-hidden shadow-black/20 mb-8">
+                        <div class="px-6 py-4 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
+                            <h3 class="font-semibold text-slate-200 flex items-center gap-2">
+                                <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                                原生深度质检报告 (testisp.info)
+                            </h3>
+                            <a id="pc-ip-score-link" href="#" class="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-colors">
+                                原版页面 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                            </a>
+                        </div>
+
+                        <div id="pc-native-score-container" class="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 bg-[#090E17]">
+                            <div class="col-span-full py-16 flex flex-col items-center justify-center text-slate-500">
+                                <svg class="animate-spin h-8 w-8 text-indigo-500 mb-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                <span>穿透请求中，正在构建原生质检报告...</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-xl overflow-hidden shadow-black/20 pb-8">
+                        <div class="px-4 py-3 border-b border-slate-800 bg-slate-900/80 flex justify-between items-center">
+                            <span class="text-xs text-slate-400 font-mono flex items-center gap-2">
+                                <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M4 17h16a2 2 0 002-2V5a2 2 0 00-2-2H4a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+                                VPS 实时运行日志 (Auto-Sync)
+                            </span>
+                            <span class="flex gap-1.5">
+                                <div class="w-3 h-3 rounded-full bg-rose-500/80 shadow-[0_0_5px_rgba(244,63,94,0.5)]"></div>
+                                <div class="w-3 h-3 rounded-full bg-amber-500/80 shadow-[0_0_5px_rgba(245,158,11,0.5)]"></div>
+                                <div class="w-3 h-3 rounded-full bg-emerald-500/80 shadow-[0_0_5px_rgba(16,185,129,0.5)]"></div>
+                            </span>
+                        </div>
+                        <div class="p-4 h-64 overflow-y-auto bg-[#0D1117] pc-font-mono text-[13px] leading-relaxed text-slate-300" id="pc-terminal-output">
+                            <div class="text-slate-500 animate-pulse">等待 VPS 心跳回传日志数据...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div v-if="role === 'user' && activeTab === 'dashboard'" class="space-y-8">
                 <div class="bg-white/60 backdrop-blur-xl p-10 md:p-16 rounded-[3rem] shadow-2xl border border-white text-center relative overflow-hidden">
                     <div class="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-lg h-32 bg-indigo-400/20 blur-3xl rounded-full pointer-events-none"></div>
@@ -499,6 +703,40 @@
                             <div class="flex justify-between items-center"><span class="font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded-xl text-xs">{{ node.protocol }}</span><span class="text-xs font-mono font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-xl">PORT: {{ node.port }}</span></div>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <div v-if="role === 'admin' && activeTab === 'thirdparty'" class="space-y-6">
+                <div class="bg-white/60 backdrop-blur-xl p-6 md:p-8 rounded-[2rem] border border-white shadow-xl shadow-slate-200/40">
+                    <h3 class="text-xl font-black text-slate-800 mb-4 flex items-center gap-2">🔗 添加第三方机场订阅</h3>
+                    <p class="text-xs text-slate-500 mb-4 font-medium">粘贴机场订阅链接（支持 Base64 / 直链），添加后系统将自动解析节点并存入数据库。删除订阅时会自动删除关联节点。后续更新请重新添加。</p>
+                    <div class="flex flex-col md:flex-row gap-4 items-end">
+                        <div class="flex-1 w-full"><label class="block text-xs font-bold text-slate-400 mb-2 pl-2">订阅别名</label><input v-model="newThirdParty.name" placeholder="例如: 美国机场" class="w-full bg-white/50 border border-white p-3 rounded-2xl transition hover:bg-white focus:bg-white text-sm"></div>
+                        <div class="flex-1 w-full"><label class="block text-xs font-bold text-slate-400 mb-2 pl-2">订阅链接 URL</label><input v-model="newThirdParty.url" placeholder="https://xxx.com/api/v1/client/subscribe?token=xxx" class="w-full bg-white/50 border border-white p-3 rounded-2xl transition hover:bg-white focus:bg-white text-sm font-mono"></div>
+                        <button @click="addThirdPartySubscription" :disabled="loadingThirdParty" class="h-[50px] bg-gradient-to-r from-orange-500 to-red-500 text-white px-8 rounded-2xl font-bold shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 transition-all whitespace-nowrap disabled:opacity-50">{{ loadingThirdParty ? '解析中...' : '➕ 添加并解析' }}</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                    <div v-for="sub in thirdPartySubscriptions" :key="sub.id" class="bg-white/70 backdrop-blur-xl p-6 rounded-[2rem] border border-white shadow-xl shadow-slate-200/40 hover:shadow-orange-100/50 transition-all">
+                        <div class="flex justify-between items-start mb-4">
+                            <div>
+                                <h3 class="font-black text-lg text-slate-800 flex items-center gap-2">{{ sub.name }} <span :class="sub.is_enable ? 'bg-emerald-500' : 'bg-rose-500'" class="w-2.5 h-2.5 rounded-full inline-block shadow-sm"></span></h3>
+                                <p class="text-[11px] text-slate-400 font-mono mt-1 break-all truncate">{{ sub.url }}</p>
+                            </div>
+                            <div class="flex gap-2">
+                                <button @click="toggleThirdPartySubscription(sub.id, sub.is_enable ? 0 : 1)" class="px-3 py-1.5 bg-white border border-slate-100 hover:bg-slate-50 rounded-xl text-xs font-bold shadow-sm">{{ sub.is_enable ? '停用' : '启用' }}</button>
+                                <button @click="deleteThirdPartySubscription(sub.id)" class="px-3 py-1.5 bg-rose-50 text-rose-500 rounded-xl text-xs font-bold transition-all">删除</button>
+                            </div>
+                        </div>
+                        <div class="flex justify-between items-center text-[11px] text-slate-500 font-bold">
+                            <span>解析节点: <span class="text-orange-600">{{ sub.node_count }}</span> 个</span>
+                            <span>添加: {{ new Date(sub.added_at).toLocaleDateString() }}</span>
+                        </div>
+                    </div>
+                </div>
+                <div v-if="thirdPartySubscriptions.length === 0" class="bg-white/60 backdrop-blur-xl p-12 rounded-[2rem] border border-dashed border-slate-300 text-center">
+                    <p class="text-slate-400 font-medium text-sm">暂无第三方订阅，请在上方添加。</p>
                 </div>
             </div>
 
@@ -690,6 +928,7 @@
                 const newVps = ref({ name: '', ip: '', os: 'debian' }); const newNodeParams = reactive({}); const newUser = reactive({ username: '', password: '', traffic_limit_gb: '', expire_date: '' });
                 const mySubToken = ref(''); const siteTitle = ref(''); const siteTitleInput = ref(''); const userNewPassword = ref('');
                 const batchStartPort = reactive({}); const batchUser = reactive({}); 
+                const thirdPartySubscriptions = ref([]); const newThirdParty = reactive({ name: '', url: '' }); const loadingThirdParty = ref(false);
                 
                 let initOsMap = {}; try { initOsMap = JSON.parse(localStorage.getItem('kui_deploy_os') || '{}'); } catch(e) {}
                 const deployOsMap = reactive(initOsMap);
@@ -720,7 +959,7 @@
                 
                 const showWelcomePopup = ref(false);
 
-                watch(activeTab, (val) => localStorage.setItem('monitor_preferred_tab', val));
+                watch(activeTab, (val) => { localStorage.setItem('monitor_preferred_tab', val); if (val === 'proxy' && isLoggedIn.value) { loadProxyPool(); setTimeout(pcInitProxy, 0); } else { pcStopProxy(); } if (val === 'thirdparty') loadThirdPartySubscriptions(); });
                 watch(probeView, (val) => localStorage.setItem('monitor_preferred_view', val));
 
                 const hasCustomCssFlag = computed(() => {
@@ -959,9 +1198,11 @@
                             if(!newNodeParams[s.ip]) newNodeParams[s.ip] = { protocol: 'XTLS-Reality', port: 443, username: 'admin', sni: '', relay_type: 'external', traffic_limit_gb: '', expire_date: '' }; 
                             if(!deployOsMap[s.ip]) deployOsMap[s.ip] = 'debian'; if(!batchStartPort[s.ip]) batchStartPort[s.ip] = ''; if(!batchUser[s.ip]) batchUser[s.ip] = 'admin';
                         });
-                        if (activeTab.value === 'nodes') renderKUICharts();
-                        
-                        if (activeTab.value === 'settings' && role.value === 'admin') {
+                    if (activeTab.value === 'nodes') renderKUICharts();
+                    
+                    if (activeTab.value === 'thirdparty') loadThirdPartySubscriptions();
+                    
+                    if (activeTab.value === 'settings' && role.value === 'admin') {
                             const probeRes = await fetchApi('/api/probe/admin/data'); const probeData = await probeRes.json();
                             Object.assign(probeSys, probeData.settings);
                             if (probeData.settings.cached_nodes_data) parseCachedNodes(probeData.settings.cached_nodes_data);
@@ -987,6 +1228,10 @@
                 const resetUserTraffic = async (username) => { await fetchApi('/api/users', { method: 'PUT', body: JSON.stringify({ username, reset_traffic: true }) }); refreshData(); };
                 const addVps = async () => { if(!newVps.value.ip || !newVps.value.name) return alert('请输入名称和IP'); deployOsMap[newVps.value.ip] = newVps.value.os; saveOsMap(); await fetchApi('/api/vps', { method: 'POST', body: JSON.stringify({ ip: newVps.value.ip, name: newVps.value.name }) }); newVps.value = { name: '', ip: '', os: 'debian' }; refreshData(); fetchProbeData();};
                 const deleteVps = async (ip) => { if(confirm('🧨 确定移除该机器？该机器相关的探针数据、节点数据将被完全清空！')) { await fetchApi(`/api/vps?ip=${ip}`, { method: 'DELETE' }); refreshData(); fetchProbeData();} };
+                const updateVpsSocks5 = async (ip, field, value) => { await fetchApi('/api/vps', { method: 'PUT', body: JSON.stringify({ ip, [field]: value }) }); };
+                const socks5Categories = Object.freeze([{ key: 'youtube', label: '🌐 YouTube' }, { key: 'ai', label: '🤖 AI' }, { key: 'google', label: '🔍 谷歌搜索' }, { key: 'streaming', label: '🎬 流媒体' }]);
+                const socks5CatSelected = (vps, cat) => { try { const d = JSON.parse(vps.socks5_domains || '{}'); return Array.isArray(d.categories) && d.categories.includes(cat); } catch(e) { return false; } };
+                const toggleSocks5Cat = (vps, cat, on) => { let d = { categories: [] }; try { d = JSON.parse(vps.socks5_domains || '{}'); if (!Array.isArray(d.categories)) d.categories = []; } catch(e) { d = { categories: [] }; } if (on) { if (!d.categories.includes(cat)) d.categories.push(cat); } else { d.categories = d.categories.filter(c => c !== cat); } const raw = JSON.stringify(d); updateVpsSocks5(vps.ip, 'socks5_domains', raw); vps.socks5_domains = raw; };
 
                 const addNode = async (ip) => {
                     const p = newNodeParams[ip]; if(!p.port) return alert('请填写端口!');
@@ -1016,7 +1261,7 @@
                 const getVpsName = (ip) => servers.value.find(s => s.ip === ip)?.name || ip;
                 
                 const saveOsMap = () => { localStorage.setItem('kui_deploy_os', JSON.stringify(deployOsMap)); };
-                const generateCmd = (ip) => { const osType = deployOsMap[ip] || 'debian'; const scriptUrl = "https://raw.githubusercontent.com/a62169722/KUI/main/vps/kui.sh"; if (osType === 'alpine') return `apk update && apk add curl && curl -sL ${scriptUrl} | sh -s -- --api "${currentDomain}" --ip "${ip}" --token "${authKey.value}"`; else return `apt-get update -y && apt-get install -y curl && bash <(curl -sL ${scriptUrl}) --api "${currentDomain}" --ip "${ip}" --token "${authKey.value}"`; };
+                const generateCmd = (ip) => { const osType = deployOsMap[ip] || 'debian'; const scriptUrl = currentDomain + "/vps/kui.sh"; if (osType === 'alpine') return `apk update && apk add curl && curl -sL ${scriptUrl} | sh -s -- --api "${currentDomain}" --ip "${ip}" --token "${authKey.value}"`; else return `apt-get update -y && apt-get install -y curl && bash <(curl -sL ${scriptUrl}) --api "${currentDomain}" --ip "${ip}" --token "${authKey.value}"`; };
 
                 const saveSiteTitle = async () => { if(!siteTitleInput.value) return alert('名称不能为空！'); await fetchApi('/api/settings', { method: 'POST', body: JSON.stringify({ site_title: siteTitleInput.value }) }); siteTitle.value = siteTitleInput.value; alert('✅ KUI 聚合面板名称保存成功！'); };
                 const updateUserPassword = async () => { if(!userNewPassword.value) return alert('请输入新密码'); await fetchApi('/api/user/password', { method: 'PUT', body: JSON.stringify({ password: userNewPassword.value }) }); alert('✅ 密码修改成功！请使用新密码重新登录。'); logout(); };
@@ -1043,6 +1288,112 @@
                 const openProbeEditModal = (s) => { editingProbeNode.value = JSON.parse(JSON.stringify(s)); if(!editingProbeNode.value.is_hidden) editingProbeNode.value.is_hidden = 'false'; if(!editingProbeNode.value.reset_day) editingProbeNode.value.reset_day = '1'; probeEditModalOpen.value = true; };
                 const saveProbeEdit = async () => { await fetchApi('/api/probe/admin/server', { method: 'PUT', body: JSON.stringify(editingProbeNode.value) }); probeEditModalOpen.value = false; refreshData(); fetchProbeData(); };
                 const deleteProbeNode = async (id) => { if (!confirm("⚠️ 确定要彻底删除该探针记录吗？如果机器还在运行 Agent，之后会自动复活！请确保先在面板的「服务器与节点」中删除此机器。")) return; await fetchApi(`/api/probe/admin/server?id=${id}`, { method: 'DELETE' }); refreshData(); fetchProbeData(); };
+                
+                const loadThirdPartySubscriptions = async () => {
+                    try {
+                        const res = await fetchApi('/api/thirdparty');
+                        thirdPartySubscriptions.value = await res.json();
+                    } catch(e) { thirdPartySubscriptions.value = []; }
+                };
+                
+                const addThirdPartySubscription = async () => {
+                    if (!newThirdParty.url) return alert('请填写订阅链接！');
+                    loadingThirdParty.value = true;
+                    try {
+                        const res = await fetchApi('/api/thirdparty', { method: 'POST', body: JSON.stringify({ name: newThirdParty.name, url: newThirdParty.url }) });
+                        if (res.ok) {
+                            const data = await res.json();
+                            let msg = `✅ 订阅添加成功！成功解析 ${data.parsedCount || 0} 个节点。`;
+                            if (data.debug) {
+                                const d = data.debug;
+                                if (d.protocolCounts) msg += `\n协议分布: ${JSON.stringify(d.protocolCounts)}`;
+                                if (d.debug && d.debug.allPrefixes) msg += `\n所有行前缀: ${JSON.stringify(d.debug.allPrefixes)}`;
+                                if (d.debug && d.debug.contentPreview) msg += `\n订阅原始内容前800字符:\n${d.debug.contentPreview}`;
+                                if (d.debug && d.debug.hy2Found && (!d.protocolCounts || !d.protocolCounts.Hysteria2)) {
+                                    msg += `\n⚠️ 订阅中发现 hysteria2 行但解析失败！hy2原始行: ${d.debug.hy2Line || '(空)'}`;
+                                }
+                                if (d.debug && d.debug.unmatchedPrefixes && Object.keys(d.debug.unmatchedPrefixes).length > 0) {
+                                    msg += `\n⚠️ 未匹配行的前缀分布: ${JSON.stringify(d.debug.unmatchedPrefixes)}`;
+                                }
+                                if (d.fetchError) msg += `\n❌ 拉取订阅失败: ${d.fetchError}`;
+                            }
+                            alert(msg);
+                            newThirdParty.name = ''; newThirdParty.url = '';
+                            loadThirdPartySubscriptions();
+                        }
+                    } catch(e) { alert('添加失败: ' + e.message); }
+                    loadingThirdParty.value = false;
+                };
+                
+                const toggleThirdPartySubscription = async (id, isEnable) => {
+                    try {
+                        await fetchApi('/api/thirdparty', { method: 'PUT', body: JSON.stringify({ id, enable: isEnable }) });
+                        loadThirdPartySubscriptions();
+                    } catch(e) {}
+                };
+                
+                const deleteThirdPartySubscription = async (id) => {
+                    if (!confirm('确定删除该订阅？关联的解析节点也会被一并删除！')) return;
+                    try {
+                        await fetchApi(`/api/thirdparty?id=${id}`, { method: 'DELETE' });
+                        loadThirdPartySubscriptions();
+                    } catch(e) { alert('删除失败: ' + e.message); }
+                };
+
+                // --- 住宅IP代理控制器方法 ---
+                const proxyConfig = reactive({ ip: '', country: 'JP', port: 7920, mesh: { enabled: false, country: 'ANY', mode: 'all', nodes: '', exit: 'ANY' } });
+                const proxyPool = ref([]);
+
+                const loadProxyPool = async () => {
+                    try {
+                        const res = await fetchApi('/api/proxy/pool');
+                        proxyPool.value = await res.json();
+                    } catch (e) { proxyPool.value = []; }
+                };
+
+                const toggleNodeProxy = async (ip, currentState) => {
+                    try {
+                        await fetchApi('/api/proxy/config', {
+                            method: 'POST',
+                            body: JSON.stringify({ ip, enabled: !currentState, port: proxyConfig.port, country: proxyConfig.country, mesh: proxyConfig.mesh })
+                        });
+                        alert(`✅ 节点 ${ip} 代理已${currentState ? '关闭' : '开启'}！`);
+                        loadProxyPool();
+                    } catch (e) {
+                        alert('❌ 代理开关切换失败: ' + e.message);
+                    }
+                };
+
+                const saveProxyConfig = async () => {
+                    const targets = proxyConfig.ip ? [proxyConfig.ip] : (servers.value || []).map(s => s.ip);
+                    if (targets.length === 0) { alert('⚠️ 暂无可下发的 VPS，请先在「服务器与节点」接入机器。'); return; }
+                    try {
+                        for (const ip of targets) {
+                            await fetchApi('/api/proxy/config', {
+                                method: 'POST',
+                                body: JSON.stringify({ ip, enabled: true, port: parseInt(proxyConfig.port) || 7920, country: proxyConfig.country.toUpperCase(), mesh: proxyConfig.mesh })
+                            });
+                        }
+                        alert(`✅ 代理配置已下发到 ${targets.length} 台 VPS！Agent 下次心跳即生效。`);
+                        loadProxyPool();
+                    } catch (e) {
+                        alert('❌ 配置下发失败: ' + e.message);
+                    }
+                };
+
+                const switchProxyIP = async () => {
+                    if (!proxyConfig.ip) { alert('⚠️ 请先在上方选择一台目标 VPS。'); return; }
+                    try {
+                        await fetchApi('/api/proxy/switch', {
+                            method: 'POST',
+                            body: JSON.stringify({ ip: proxyConfig.ip })
+                        });
+                        alert('✅ 强制更换IP指令已发送！（VPS 公网 IP 固定时仅记录切换并触发重新上报）');
+                        loadProxyPool();
+                    } catch (e) {
+                        alert('❌ 指令发送失败: ' + e.message);
+                    }
+                };
 
                 let dataTimer = null; let pingTimer = null; let probeTimer = null;
                 const startPolling = () => { 
@@ -1063,17 +1414,322 @@
                 return { 
                     isLoggedIn, showLoginModal, loginUser, password, currentUser, role, activeTab, 
                     servers, nodes, users, newVps, newNodeParams, newUser, 
-                    login, logout, refreshData, addUser, toggleUser, deleteUser, resetUserTraffic, addVps, deleteVps, addNode, deleteNode, toggleNode, resetTraffic, 
+                    login, logout, refreshData, addUser, toggleUser, deleteUser, resetUserTraffic, addVps, deleteVps, updateVpsSocks5, socks5Categories, socks5CatSelected, toggleSocks5Cat, addNode, deleteNode, toggleNode, resetTraffic, 
                     getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateSubLink, copyCommand, 
                     globalOnline, globalTraffic, globalSpeedIn, globalSpeedOut, deployOsMap, saveOsMap, siteTitle, siteTitleInput, saveSiteTitle, userNewPassword, updateUserPassword, resetMySubLink, generateUUIDForNewUser, batchStartPort, batchUser, deployAllProtocols,
                     probeSys, publicProbeServers, filteredProbeServers, probeView, probeDetailId, probeDetail, setProbeView, openProbeDetail, probeGlobalOnline, probeGlobalOffline, probeGlobalSpeedIn, probeGlobalSpeedOut, probeGlobalNetRx, probeGlobalNetTx, filteredProbeGroups, probeCountryStats, currentFilter,
                     saveProbeSettings, adminProbeServers, probeEditModalOpen, editingProbeNode, openProbeEditModal, saveProbeEdit, deleteProbeNode, currentDomain,
+                    thirdPartySubscriptions, newThirdParty, loadingThirdParty, loadThirdPartySubscriptions, addThirdPartySubscription, toggleThirdPartySubscription, deleteThirdPartySubscription,
                     qrModalOpen, qrCodeImage, showQrCode, 
                     showWelcomePopup, closePopup,
-                    availableThemes, pingNodes, pullGithubNodes, hasCustomCssFlag
+                    availableThemes, pingNodes, pullGithubNodes, hasCustomCssFlag,
+                    proxyConfig, toggleNodeProxy, saveProxyConfig, switchProxyIP, proxyPool, loadProxyPool
                 };
             }
         }).mount('#app');
+    </script>
+
+    <script>
+        /* ================= Proxy Controller 双活引擎总控 (内联逻辑) ================= */
+        let pcInterval = null;
+        let pcCurrentScoreIp = "";
+
+        async function getPcAuthHeader() {
+            const user = localStorage.getItem('kui_user') || 'admin';
+            const key = localStorage.getItem('kui_auth_key') || '';
+            if (!key) return 'admin';
+            const ts = Date.now();
+            const sig = await generateHMAC(key, user + ts);
+            return `${btoa(user)}.${ts}.${sig}`;
+        }
+
+        async function pcFetchCountries() {
+            try {
+                const auth = await getPcAuthHeader();
+                const res = await fetch('/api/proxy/countries', { headers: { 'Authorization': auth } });
+                const list = await res.json();
+                const container = document.getElementById('countries-list');
+                if (!container) return;
+                container.innerHTML = list.map(c => `<span class="bg-slate-800/80 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-300 transition-colors border border-slate-700/50 px-2.5 py-1 rounded-md text-xs font-mono font-bold shadow-sm cursor-default">${c}</span>`).join('');
+            } catch(e) {}
+        }
+
+        async function pcLoadConfig() {
+            try {
+                const auth = await getPcAuthHeader();
+                const res = await fetch('/api/proxy/config', { headers: { 'Authorization': auth } });
+                if (!res.ok) { const err = await res.text(); throw new Error(err || res.status); }
+                const map = await res.json();
+                const cfg0 = document.getElementById('slot-cfg-0');
+                const port = document.getElementById('slot-port');
+                const country = map["0"] || map.proxy?.country || 'JP';
+                if (cfg0) cfg0.value = String(country).toUpperCase();
+                if (port) port.value = map["port"] || map.proxy?.port || 7920;
+            } catch(e) { console.warn('[pc] loadConfig failed:', e); }
+        }
+
+        async function pcSaveConfig() {
+            const val = document.getElementById(`slot-cfg-0`).value.toUpperCase().trim() || 'JP';
+            const port = parseInt(document.getElementById(`slot-port`).value) || 7920;
+            try {
+                const auth = await getPcAuthHeader();
+                const res = await fetch('/api/proxy/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': auth },
+                    body: JSON.stringify({ "0": val, "country": val, "port": port, "switch_trigger": Date.now() })
+                });
+                const text = await res.text();
+                if (!res.ok) throw new Error(text || res.status);
+                // 直接从 POST 响应体更新输入字段，避免立即回读时 D1 最终一致性导致读到旧数据
+                try {
+                    const resp = JSON.parse(text);
+                    const saved = resp.slot_map || resp.proxy || {};
+                    const cfg0 = document.getElementById('slot-cfg-0');
+                    const portEl = document.getElementById('slot-port');
+                    if (cfg0) cfg0.value = String(saved["0"] || saved.country || val).toUpperCase();
+                    if (portEl) portEl.value = saved.port || port;
+                } catch(e) { console.warn('[pc] parse response failed', e); }
+                alert('🚀 策略及端口已云端同步！Agent 将在下一心跳周期应用。');
+            } catch (e) { alert('❌ 下发失败: ' + e.message); }
+        }
+
+        async function pcSwitchIP() {
+            const val = document.getElementById(`slot-cfg-0`).value.toUpperCase().trim() || 'JP';
+            const port = parseInt(document.getElementById(`slot-port`).value) || 7920;
+            try {
+                const auth = await getPcAuthHeader();
+                const res = await fetch('/api/proxy/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': auth },
+                    body: JSON.stringify({ "0": val, "country": val, "port": port, "switch_trigger": Date.now() })
+                });
+                if (!res.ok) { const err = await res.text(); throw new Error(err || res.status); }
+                alert('🔄 重拨指令已下发！VPS 将清退当前通道池重新并发建连...');
+            } catch (e) { alert('❌ 下发失败: ' + e.message); }
+        }
+
+        async function pcLoadNativeIpScore(ip) {
+            const container = document.getElementById('pc-native-score-container');
+            if (!container) return;
+            container.innerHTML = '<div class="col-span-full py-16 flex flex-col items-center justify-center text-slate-500"><svg class="animate-spin h-8 w-8 text-indigo-500 mb-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span>穿透请求中，正在构建原生质检报告...</span></div>';
+
+            try {
+                const res = await fetch('/api/proxy/testisp-lookup/' + encodeURIComponent(ip));
+                const rawText = await res.text();
+
+                let d;
+                try {
+                    d = JSON.parse(rawText);
+                } catch (e) {
+                    const safeText = rawText.substring(0, 500).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    throw new Error(`目标接口返回了非 JSON 格式数据(可能 API 路径错误或被云端盾拦截)。<br>HTTP 状态码: ${res.status}<br><div class="mt-3 text-left bg-slate-900 p-3 rounded text-xs text-rose-300 font-mono break-all overflow-y-auto max-h-32 border border-rose-500/30">${safeText}</div>`);
+                }
+
+                if (!d || !d.geo || !d.isp) {
+                    container.innerHTML = `<div class="col-span-full text-center py-8 text-rose-400 bg-rose-500/10 rounded-xl border border-rose-500/20">无法获取报告: 接口返回数据结构异常 ${d.error || ''}</div>`;
+                    return;
+                }
+
+                const isHosting = d.isp.flag === 'hosting';
+                const threat = d.risk.threat_listed;
+                const isNative = d.geo.is_native;
+
+                const tags = isHosting
+                    ? '<span class="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/20 text-xs font-bold">机房IP</span>'
+                    : '<span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 text-xs font-bold">家庭宽带</span>';
+
+                const locStr = [d.geo.country, d.geo.city].filter(Boolean).join(" ");
+                const orgStr = d.isp.org || '-';
+
+                container.innerHTML = `
+                    <div class="col-span-full bg-slate-800/60 border border-slate-700/80 p-5 rounded-2xl flex flex-wrap gap-4 justify-between items-center mb-2 shadow-lg">
+                        <div class="flex items-center gap-4">
+                            <span class="text-3xl font-extrabold font-mono text-white tracking-tight drop-shadow-sm">${ip}</span>
+                            <span class="text-slate-400 text-sm hidden sm:flex items-center border-l border-slate-700 pl-4 h-6">
+                                <span class="uppercase tracking-widest text-indigo-400 mr-2 text-xs font-bold">${d.geo.country_code || 'N/A'}</span>
+                                ${locStr} · ${orgStr}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-800/40 border border-slate-700/60 p-6 rounded-2xl flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow hover:bg-slate-800/60">
+                        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-widest pb-3 border-b border-slate-700/50">基础物理画像</h4>
+                        <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">IP 原生性</span> <span class="font-medium text-sm">${isNative ? '<span class="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold">原生 IP (Native)</span>' : `<span class="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold">${d.geo.native_type || '广播 IP'}</span>`}</span></div>
+                        <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">业务标记</span> <div class="flex gap-1">${tags}</div></div>
+                        <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">运营类型</span> <span class="font-medium ${isHosting ? 'text-rose-400' : 'text-emerald-400'} text-sm">${d.isp.type || '-'}</span></div>
+                        <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">归属机构</span> <span class="font-medium text-slate-300 text-sm truncate max-w-[150px]" title="${orgStr}">${orgStr}</span></div>
+                    </div>
+
+                    <div class="bg-slate-800/40 border border-slate-700/60 p-6 rounded-2xl flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow hover:bg-slate-800/60">
+                        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-widest pb-3 border-b border-slate-700/50">ISP 网络底层</h4>
+                        <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">ASN</span> <span class="font-medium text-indigo-300 text-sm font-mono">${d.isp.asn || '-'}</span></div>
+                        <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">解析时区</span> <span class="font-medium text-slate-300 text-sm font-mono">${d.geo.timezone || '-'}</span></div>
+                        <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">偏移量 (Drift)</span> <span class="font-medium ${d.geo.has_drift ? 'text-rose-400' : 'text-emerald-400'} text-sm">${d.geo.drift_km || 0} km</span></div>
+                        <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">反向 DNS (rDNS)</span> <span class="font-medium text-slate-400 text-xs font-mono truncate max-w-[150px]" title="${d.isp.rdns || '-'}">${d.isp.rdns || '-'}</span></div>
+                    </div>
+
+                    <div class="bg-slate-800/40 border border-slate-700/60 p-6 rounded-2xl flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow hover:bg-slate-800/60">
+                        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-widest pb-3 border-b border-slate-700/50">风险深度检测</h4>
+                        <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">Spamhaus 情报</span> <span class="${threat ? 'px-2.5 py-1 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-bold' : 'px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold'}">${threat ? '🚨 已在黑名单' : '✅ 纯净无异常'}</span></div>
+                        <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">代理/机房特征</span> <span class="font-medium text-xs font-bold ${d.isp.warning ? 'text-amber-400' : 'text-emerald-400'} truncate max-w-[150px]" title="${d.isp.warning || ''}">${d.isp.warning || '未检测到明显异常'}</span></div>
+                        <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">数据源</span> <span class="font-medium text-slate-400 text-xs">${d.data_source || 'Unknown'}</span></div>
+                    </div>
+                `;
+            } catch (e) {
+                container.innerHTML = `<div class="col-span-full text-left p-6 text-rose-400 bg-rose-500/10 rounded-xl border border-rose-500/20">${e.message}</div>`;
+            }
+        }
+
+        async function pcFetchNodes() {
+            try {
+                const auth = await getPcAuthHeader();
+                const res = await fetch(`/api/proxy/nodes?t=${Date.now()}`, { headers: { 'Authorization': auth } });
+                const servers = await res.json();
+                const tbody = document.getElementById('pc-nodes-table');
+                const terminal = document.getElementById('pc-terminal-output');
+                if (!tbody) return;
+
+                if (!servers || servers.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" class="py-12 text-center text-slate-500 flex-col items-center justify-center"><svg class="w-12 h-12 mx-auto text-slate-700 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>未检测到在线母机，请在 VPS 运行纳管命令接入</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = servers.map(server => {
+                    const details = JSON.parse(server.details || '[]');
+                    const timeAgo = Math.floor((Date.now() - server.last_seen) / 1000);
+
+                    let proxyBadges = '';
+                    if (details.length === 0) {
+                        if (timeAgo < 8) {
+                            proxyBadges = `
+                            <div class="inline-flex items-center bg-slate-900 border border-sky-500/30 rounded-xl px-3 py-1.5 shadow-inner text-sky-400/90 text-sm">
+                                <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-sky-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                通道握手初始化中...
+                            </div>`;
+                        } else if (timeAgo < 30) {
+                            proxyBadges = `
+                            <div class="inline-flex items-center bg-slate-900 border border-slate-700/50 rounded-xl px-3 py-1.5 shadow-inner text-slate-400/80 text-xs">
+                                <svg class="animate-spin -ml-1 mr-2 h-3 w-3 text-slate-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                隧道数据同步中...
+                            </div>`;
+                        } else {
+                            proxyBadges = `
+                            <div class="inline-flex items-center bg-slate-900 border border-amber-500/30 rounded-xl px-3 py-1.5 shadow-inner text-amber-400/90 text-sm">
+                                <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-amber-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                双路通道失联，正在抢救拨号中...
+                            </div>`;
+                        }
+                    } else {
+                        proxyBadges = '<div class="flex flex-col gap-2">' + details.map(d => {
+                            const isActive = d.active;
+                            const statusColorClass = isActive ? 'bg-emerald-500' : 'bg-sky-500';
+                            const statusText = isActive ? 'ACTIVE (业务出口)' : 'STANDBY (热备就绪)';
+                            const borderColorClass = isActive ? 'border-emerald-500/30' : 'border-sky-500/30';
+                            const bgColorClass = isActive ? 'bg-emerald-500/10' : 'bg-sky-500/10';
+                            const textColorClass = isActive ? 'text-emerald-400' : 'text-sky-400';
+
+                            return `
+                            <div class="inline-flex items-center bg-slate-950 border border-slate-800/80 rounded-xl px-2.5 py-1.5 shadow-inner">
+                                <span class="bg-slate-800 text-slate-300 font-mono text-xs px-2 py-0.5 rounded-md mr-3 border border-slate-700 font-bold">${d.tunnel}</span>
+                                <span class="bg-indigo-500/20 text-indigo-400 font-bold font-mono text-xs px-2 py-0.5 rounded-md mr-3 border border-indigo-500/20">${d.country}</span>
+                                <span class="font-mono text-slate-300 text-sm tracking-wide mr-3" title="出口物理 IP">${d.node_ip || '---.---.---.---'}:${d.port}</span>
+                                <span class="flex items-center gap-1.5 ${textColorClass} ${bgColorClass} px-2 py-0.5 rounded-md border ${borderColorClass} text-xs font-medium">
+                                    <span class="w-1.5 h-1.5 rounded-full ${statusColorClass} shadow-[0_0_5px_currentColor]"></span> ${statusText}
+                                </span>
+                            </div>`;
+                        }).join('') + '</div>';
+                    }
+
+                    return `
+                        <tr class="hover:bg-slate-800/30 transition-colors group">
+                            <td class="py-5 px-6 font-mono text-indigo-300 align-middle">
+                                <div class="flex items-center gap-2">
+                                    <svg class="w-4 h-4 text-slate-600 group-hover:text-indigo-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
+                                    ${server.ip}
+                                </div>
+                            </td>
+                            <td class="py-5 px-6 align-middle">${proxyBadges}</td>
+                            <td class="py-5 px-6 align-middle">
+                                <span class="flex items-center gap-1.5 ${timeAgo < 20 ? 'text-emerald-400' : 'text-rose-400'} font-mono text-xs">
+                                    <span class="w-1.5 h-1.5 rounded-full ${timeAgo < 20 ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}"></span>
+                                    ${timeAgo}s 前
+                                </span>
+                            </td>
+                            <td class="py-5 px-6 align-middle text-right">
+                                <span class="${details.length === 2 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : (details.length === 1 ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30')} py-1 px-3 rounded-md text-xs font-mono font-bold">
+                                    ${details.length} / 2
+                                </span>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+
+                if (servers.length > 0 && servers[0].details) {
+                    const details = JSON.parse(servers[0].details);
+                    const activeNode = details.find(d => d.active) || details[0];
+                    if (activeNode && activeNode.node_ip) {
+                        const newIp = activeNode.node_ip;
+                        if (newIp !== pcCurrentScoreIp) {
+                            pcCurrentScoreIp = newIp;
+                            const scoreSection = document.getElementById('pc-ip-score-section');
+                            if (scoreSection) scoreSection.style.display = 'block';
+
+                            const scoreLink = document.getElementById('pc-ip-score-link');
+                            scoreLink.href = `https://testisp.info/?ip=${newIp}`;
+                            scoreLink.onclick = (e) => {
+                                e.preventDefault();
+                                navigator.clipboard.writeText(newIp).then(() => {
+                                    alert('🟢 已自动复制隧道节点 IP: ' + newIp + '\n\n由于 testisp.info 官网默认仅检测本机，请在随后打开的网页【输入框】中【粘贴】并回车查询！');
+                                    window.open(`https://testisp.info/?ip=${newIp}`, '_blank');
+                                }).catch(() => {
+                                    window.open(`https://testisp.info/?ip=${newIp}`, '_blank');
+                                });
+                            };
+
+                            pcLoadNativeIpScore(newIp);
+                        }
+                    }
+                }
+
+                if (terminal && servers[0] && servers[0].logs) {
+                    const isAtBottom = terminal.scrollHeight - terminal.scrollTop <= terminal.clientHeight + 30;
+
+                    let logHTML = servers[0].logs
+                        .replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                        .replace(/\[\*\]/g, '<span class="text-indigo-400 font-bold">[*]</span>')
+                        .replace(/\[\+\]/g, '<span class="text-emerald-400 font-bold">[+]</span>')
+                        .replace(/\[\-\]/g, '<span class="text-rose-400 font-bold">[-]</span>')
+                        .replace(/\[\!\]/g, '<span class="text-amber-400 font-bold">[!]</span>');
+
+                    terminal.innerHTML = '<pre class="whitespace-pre-wrap break-all">' + logHTML + '</pre>';
+
+                    if (isAtBottom) {
+                        terminal.scrollTop = terminal.scrollHeight;
+                    }
+                }
+
+            } catch (err) {}
+        }
+
+        function pcInitProxy() {
+            pcStopProxy();
+            pcCurrentScoreIp = "";
+
+            try {
+                const origin = window.location.origin;
+                const el = document.getElementById('agent-cmd');
+                if (el) el.textContent = 'bash <(curl -sL ' + origin + '/vps/residential-proxy.sh) --domain ' + origin + ' --controller ' + origin;
+            } catch (e) {}
+
+            pcFetchCountries();
+            pcLoadConfig();
+            pcFetchNodes();
+            pcInterval = setInterval(pcFetchNodes, 5000);
+        }
+
+        function pcStopProxy() {
+            if (pcInterval) { clearInterval(pcInterval); pcInterval = null; }
+        }
     </script>
 </body>
 </html>

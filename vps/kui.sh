@@ -10,6 +10,7 @@ while [ "$#" -gt 0 ]; do
         --api) API_URL="$2"; shift ;;
         --ip) VPS_IP="$2"; shift ;;
         --token) TOKEN="$2"; shift ;;
+        --proxy-api) PROXY_API_URL="$2"; shift ;;
         *) echo "未知参数: $1"; exit 1 ;;
     esac
     shift
@@ -32,6 +33,8 @@ echo "=========================================="
 echo " 🚀 KUI Agent 智能安装启动中..."
 echo " 💻 目标系统: ${OS}"
 echo "=========================================="
+
+export CURL_USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
 
 echo "[1/6] 🧹 正在清理历史残留..."
 if [ "$OS" = "alpine" ]; then
@@ -62,29 +65,45 @@ echo "[3/6] 📦 正在安装底层网络依赖..."
 if [ "$OS" = "alpine" ]; then
     apk update
     apk add python3 curl openssl iptables ip6tables coreutils bash tar libc6-compat gcompat iproute2
-else
+    else
     apt-get update -y
     apt-get install -y python3 curl openssl iptables coreutils bash tar iproute2 iputils-ping
-fi
+    fi
 
 echo "[4/6] ⚙️ 部署 Sing-box 代理核心..."
-if ! command -v sing-box >/dev/null 2>&1; then
-    if [ "$OS" = "alpine" ]; then
-        ARCH=$(uname -m)
-        case "$ARCH" in
-            x86_64) SB_ARCH="amd64" ;;
-            aarch64) SB_ARCH="arm64" ;;
-            *) echo "不支持的 CPU 架构: $ARCH"; exit 1 ;;
-        esac
-        SB_VER=$(curl -s "https://api.github.com/repos/SagerNet/sing-box/releases/latest" | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-        curl -sLo sing-box.tar.gz "https://github.com/SagerNet/sing-box/releases/download/v${SB_VER}/sing-box-${SB_VER}-linux-${SB_ARCH}.tar.gz"
-        tar -xzf sing-box.tar.gz
-        mv sing-box-${SB_VER}-linux-${SB_ARCH}/sing-box /usr/bin/
-        chmod +x /usr/bin/sing-box
-        rm -rf sing-box.tar.gz sing-box-${SB_VER}-linux-${SB_ARCH}
-    else
-        bash <(curl -fsSL https://sing-box.app/deb-install.sh)
-    fi
+rm -f /usr/bin/sing-box
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64) SB_ARCH="amd64" ;;
+    aarch64) SB_ARCH="arm64" ;;
+    *) echo "不支持的 CPU 架构: $ARCH"; exit 1 ;;
+esac
+SB_VER="1.13.14"
+curl -sLo sing-box.tar.gz -A "$CURL_USER_AGENT" "https://github.com/SagerNet/sing-box/releases/download/v${SB_VER}/sing-box-${SB_VER}-linux-${SB_ARCH}.tar.gz"
+tar -xzf sing-box.tar.gz
+mv sing-box-${SB_VER}-linux-${SB_ARCH}/sing-box /usr/bin/
+chmod +x /usr/bin/sing-box
+rm -rf sing-box.tar.gz sing-box-${SB_VER}-linux-${SB_ARCH}
+
+echo "[4.5/6] ⚙️ 正在应用网络内核调优（BBR / QUIC / conntrack）..."
+if [ "$OS" = "alpine" ]; then
+    modprobe -q xt_conntrack 2>/dev/null
+    sysctl -w net.netfilter.nf_conntrack_max=1048576 >/dev/null 2>&1
+else
+    cat > /etc/sysctl.d/99-kui-optimize.conf <<'SYSCTL'
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+net.ipv4.tcp_rmem = 4096 87380 67108864
+net.ipv4.tcp_wmem = 4096 65536 67108864
+net.core.rmem_max = 67108864
+net.core.wmem_max = 67108864
+net.core.netdev_max_backlog = 5000
+net.netfilter.nf_conntrack_max = 1048576
+net.netfilter.nf_conntrack_udp_timeout = 60
+net.netfilter.nf_conntrack_tcp_timeout_established = 7200
+net.netfilter.nf_conntrack_tcp_timeout_time_wait = 30
+SYSCTL
+    sysctl --system >/dev/null 2>&1
 fi
 
 echo "[5/6] 📂 初始化 KUI 工作目录与环境..."
@@ -95,12 +114,30 @@ cat > /opt/kui/config.json <<EOF
   "api_url": "${API_URL}/api/config",
   "report_url": "${API_URL}/api/report",
   "ip": "${VPS_IP}",
-  "token": "${TOKEN}"
+  "token": "${TOKEN}",
+  "proxy_api": "${PROXY_API_URL}"
 }
 EOF
 
 echo "正在拉取最新版 Agent 执行器..."
-curl -sL "https://raw.githubusercontent.com/a62169722/KUI/main/vps/agent.py" -o /opt/kui/agent.py
+AGENT_URL="${API_URL}/vps/agent.py"
+BACKUP_URL="https://raw.githubusercontent.com/a62169722/KUI/main/vps/agent.py"
+# 校验下载内容确实是 Python（含 import 且不是 GitHub 429/HTML 错误页）
+is_valid_py() { [ -s "$1" ] && grep -q "import " "$1" && ! grep -qiE "429|too many requests|<html" "$1"; }
+fetch_agent() { curl -sL --retry 3 --retry-delay 2 -A "$CURL_USER_AGENT" "$1" -o /opt/kui/agent.py; }
+rm -f /opt/kui/agent.py
+fetch_agent "$AGENT_URL"
+if ! is_valid_py /opt/kui/agent.py; then
+    echo "⚠️ 主源（面板）下载异常（可能未部署 vps/agent.py 或限流），尝试备用源..."
+    fetch_agent "$BACKUP_URL"
+fi
+if ! is_valid_py /opt/kui/agent.py; then
+    echo "⏳ 备用源疑似限流，等待 8s 后重试..."
+    sleep 8; fetch_agent "$BACKUP_URL"
+fi
+if ! is_valid_py /opt/kui/agent.py; then
+    echo "❌ 下载 agent.py 失败：请确认已在 Cloudflare Pages 部署本仓库（使 /vps/agent.py 可访问），或稍后避开 GitHub 限流再试。"; exit 1;
+fi
 chmod +x /opt/kui/agent.py
 
 echo "[6/6] 🛡️ 智能注册底层守护进程并启动..."
@@ -143,7 +180,27 @@ WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
     systemctl enable kui-agent
-    systemctl enable sing-box
+    if command -v sing-box >/dev/null 2>&1; then
+        if [ ! -f /etc/systemd/system/sing-box.service ]; then
+            cat > /etc/systemd/system/sing-box.service <<EOF
+[Unit]
+Description=Sing-box Proxy Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/sing-box run -c /etc/sing-box/config.json
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+            systemctl daemon-reload
+        fi
+        systemctl enable sing-box
+    fi
     systemctl start kui-agent
 fi
 
